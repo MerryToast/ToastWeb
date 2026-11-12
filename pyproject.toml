@@ -1,0 +1,13 @@
+[project]
+name = "toastweb"
+version = "0.1.0"
+description = "Isolated static website backend with HTTP-01 certificates"
+requires-python = ">=3.10"
+license = "MIT"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]

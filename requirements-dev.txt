@@ -1,0 +1,2 @@
+# Development-only lint tool; production uses the Python standard library.
+ruff==0.14.0

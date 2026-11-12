@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - name: Install test-only tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            nginx openssl shellcheck
+          python3 -m venv /tmp/toastweb-lint
+          /tmp/toastweb-lint/bin/pip install ruff==0.14.0
+      - name: Lint and syntax
+        run: |
+          /tmp/toastweb-lint/bin/ruff check .
+          bash -n install.sh
+          shellcheck install.sh
+          python3 -m compileall -q toastweb.py tests
+      - name: Unit and isolated Nginx integration tests
+        env:
+          TOASTWEB_LIVE_NGINX: "1"
+        run: python3 -m unittest discover -s tests -v
+      - name: Confirm plan is non-mutating
+        run: >-
+          python3 toastweb.py plan
+          --domain notes.example.org --email ops@example.org

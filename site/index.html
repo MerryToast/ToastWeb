@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{SITE_DESCRIPTION}}">
+  <title>{{SITE_TITLE}}</title>
+  <link rel="icon" href="/assets/toast.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+  <header class="site-header wrap">
+    <a class="brand" href="/"><img src="/assets/toast.svg" width="32" height="32" alt="">{{SITE_TITLE}}</a>
+    <nav aria-label="主导航"><a href="/" aria-current="page">首页</a><a href="/notes/">笔记</a><a href="/about/">关于</a></nav>
+  </header>
+  <main class="wrap">
+    <section class="hero">
+      <span class="eyebrow">A quiet corner of the web</span>
+      <h1>把想法留下来，<br>慢慢整理成答案。</h1>
+      <p class="intro">{{SITE_DESCRIPTION}}</p>
+      <a class="button" href="/notes/">浏览笔记 <span aria-hidden="true">↗</span></a>
+    </section>
+    <section class="section" aria-labelledby="recent">
+      <div class="section-heading"><h2 id="recent">从这里开始</h2><span>Notes &amp; small discoveries</span></div>
+      <article class="note-card">
+        <span class="tag">使用说明</span>
+        <h3><a href="/notes/welcome/">欢迎来到这个小站</a></h3>
+        <p>一个留给笔记、想法和有用事物的地方。从一篇自己的文章开始。</p>
+        <a class="text-link" href="/notes/welcome/">阅读说明 <span aria-hidden="true">→</span></a>
+      </article>
+    </section>
+    <aside class="aside-note"><span aria-hidden="true">✳</span><p>少一点喧闹，多一点记录。这个网站不需要账号，也没有广告或第三方追踪。</p></aside>
+  </main>
+  <footer class="wrap site-footer"><span>© {{YEAR}} {{SITE_TITLE}}</span><a href="/about/">About this space</a></footer>
+</body>
+</html>
