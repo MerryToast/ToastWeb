@@ -163,6 +163,17 @@ class FileTests(unittest.TestCase):
             target = root / url.lstrip("/")
             self.assertTrue((target / "index.html").is_file() if url.endswith("/") else target.is_file(), url)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX umask semantics")
+    def test_public_paths_with_restrictive_umask(self) -> None:
+        previous = os.umask(0o077)
+        try:
+            release = tw.create_release(self.paths, tw.BUNDLE / "site", "Title", "Description", "notes.example.org", builtin=True)
+            for directory in (self.paths.current.parent, self.paths.releases, self.paths.acme.parent,
+                              self.paths.acme / ".well-known/acme-challenge", self.paths.releases / release):
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o755)
+        finally:
+            os.umask(previous)
+
     def test_hidden_content_rejected(self) -> None:
         source = self.paths.at("/input")
         tw.write_atomic(source / "index.html", "hello")

@@ -358,7 +358,8 @@ def load_state(paths: Paths) -> dict[str, Any] | None:
 
 
 def assert_owned(paths: Paths) -> None:
-    for directory in (paths.config.parent, paths.app, paths.current.parent, paths.acme, paths.logs):
+    for directory in (paths.config.parent, paths.app, paths.current.parent, paths.releases,
+                      paths.acme.parent, paths.acme, paths.logs):
         if directory.is_symlink():
             raise ToastError(f"Refusing a symlink at a managed directory: {directory}")
     for path in paths.managed_files():
@@ -379,6 +380,18 @@ def assert_owned(paths: Paths) -> None:
         raise ToastError("Existing application directory is not a ToastWeb installation.")
 
 
+def prepare_public_paths(paths: Paths) -> None:
+    # Static files must remain traversable by Nginx workers even with root umask 077.
+    # Backups/state/private keys are not included and keep restrictive permissions.
+    directories = [paths.current.parent, paths.releases, paths.acme.parent, paths.acme,
+                   paths.acme / ".well-known", paths.acme / ".well-known/acme-challenge"]
+    for directory in directories:
+        if directory.is_symlink():
+            raise ToastError(f"Refusing a symlink in public data directories: {directory}")
+        directory.mkdir(parents=True, exist_ok=True)
+        directory.chmod(0o755)
+
+
 def create_release(paths: Paths, source: Path, title: str, description: str, domain: str, *, builtin: bool) -> str:
     source = source.resolve()
     if not (source / "index.html").is_file():
@@ -392,7 +405,7 @@ def create_release(paths: Paths, source: Path, title: str, description: str, dom
         raise ToastError("Hidden files/directories are not accepted in public site content.")
     release = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     destination = paths.releases / release
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    prepare_public_paths(paths)
     shutil.copytree(source, destination)
     substitutions = {"{{SITE_TITLE}}": html.escape(title, quote=True),
                      "{{SITE_DESCRIPTION}}": html.escape(description, quote=True),
@@ -873,7 +886,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "plan":
             print(json.dumps({"version": VERSION, "domain": args.domain, "https_backend": f"127.0.0.1:{args.port}",
                               "http_validation_port": 80, "certificate_method": "HTTP-01 webroot",
-                              "service": SERVICE, "changes": ["APT dependencies", "ToastWeb-owned files/service", "ToastWeb certificate", "Certbot timer"],
+                              "service": SERVICE, "changes": ["APT dependencies", "ToastWeb-owned files/service", "ToastWeb certificate", "ToastWeb renewal timer"],
                               "never_changes": ["DNS", "Xray/x-ui", "subscriptions", "firewall", "kernel parameters"],
                               "executed": False}, ensure_ascii=False, indent=2))
         elif args.command == "install":

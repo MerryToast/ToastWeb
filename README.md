@@ -173,6 +173,7 @@ sudo toastweb rollback
 - 站点变更失败时，尽力恢复本项目配置、应用文件、服务状态及内容指针；保留备份和未激活内容版本。
 - 不为恢复而重启或停止 Xray、x-ui、现有 Nginx、SSH 等无关服务。
 - APT 中断可能需要管理员修复；不会自动卸载系统软件包。
+- 包安装期间会临时创建 `/usr/sbin/policy-rc.d` 阻止服务自动启动/重启，并在正常异常退出时清理。断电或 SIGKILL 可能留下它：管理员应核实其包含 `Temporary ToastWeb package-install guard` 标记后再清理，不能盲目删除已有管理员策略。
 - 续签失败需检查 journal 和 DNS/80/CAA/CA 限流等原因。创建 timer 不代表永远续签成功。
 - V1 不提供自动清理/卸载命令，避免误删共享依赖或仍在使用的证书。请按文件清单人工审查清理，先处理仍在引用该网站的 REALITY。
 
@@ -188,7 +189,7 @@ bash -n install.sh
 TOASTWEB_LIVE_NGINX=1 python3 -m unittest discover -s tests -v
 ```
 
-集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上执行这些测试；Debian 13 的首次真实 VPS 试点仍需单独验收。
+集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上执行这些测试；Debian 13 的首次真实 VPS 试点仍需单独验收。初版测试记录见 [TESTING.md](TESTING.md)。
 
 ## 安全与许可
 
