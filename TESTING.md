@@ -1,5 +1,16 @@
 # 验证记录
 
+## 0.3：审查修复与测试边界
+
+- 回归覆盖相对目录跳转、正确 SNI 配错误 HTTP/1.1 Host / HTTP/2 authority、未知 SNI 拒绝。
+- 同一真实 Nginx 测试分别覆盖默认 HTTP 404 和主动启用的 HTTPS 跳转，ACME 路径始终直接服务。
+- CI 分别以非 root、root 运行完整测试；root 场景检查 worker 实际为 www-data。仅放开临时公开父目录的遍历权限，证书目录 0700、私钥 0600 不放宽。
+- 单元测试覆盖 NAT 连接失败例外的严格边界、token/HTTP 错误、跳转确认和失败恢复、所有权及保留备份引用、清理预览/异常/符号链接保护、FD 预算和非变更式 plan。
+- HTTP/2 的 h2 包仅为开发测试依赖，不引入 VPS Python 第三方依赖。
+- 连接参数的渲染与 FD 预算检查不是并发/性能压力测试。CI 不申请真实证书、不操作生产 systemd、DNS 或 REALITY。
+- 本地 Windows：86 项中 57 项通过、29 项 Linux 专用测试按设计跳过；Ruff、Python/Bash/Node 语法检查通过。Edge 重新渲染 6 张桌面/窄屏截图，1440/390 视口无横向溢出。
+- Linux 具体执行结果以本版本提交的 [Actions](https://github.com/MerryToast/ToastWeb/actions) 为准；本地跳过 Linux 测试不代表通过。
+
 ## 0.2：docs / status / api 三套模板
 
 - 本地 Ruff、Bash 与 Node 开发工具语法检查通过。

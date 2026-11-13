@@ -22,7 +22,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             nginx openssl shellcheck
           python3 -m venv /tmp/toastweb-lint
-          /tmp/toastweb-lint/bin/pip install ruff==0.14.0
+          /tmp/toastweb-lint/bin/pip install -r requirements-dev.txt
       - name: Lint and syntax
         run: |
           /tmp/toastweb-lint/bin/ruff check .
@@ -30,10 +30,14 @@ jobs:
           shellcheck install.sh
           python3 -m compileall -q toastweb.py tests tools
           node --check tools/capture_preview.mjs
-      - name: Unit and isolated Nginx integration tests
-        env:
-          TOASTWEB_LIVE_NGINX: "1"
-        run: python3 -m unittest discover -s tests -v
+      - name: Non-root unit and isolated Nginx integration tests
+        run: |
+          test "$(id -u)" -ne 0
+          TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-lint/bin/python -m unittest discover -s tests -v
+      - name: Root unit and privilege-dropping Nginx integration tests
+        run: |
+          sudo -u root sh -c 'test "$(id -u)" -eq 0'
+          sudo -u root env TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-lint/bin/python -m unittest discover -s tests -v
       - name: Confirm plan is non-mutating
         run: >-
           python3 toastweb.py plan

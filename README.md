@@ -2,9 +2,9 @@
 
 **一个不接管现有代理的轻量静态网站部署器。**
 
-默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
+默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 默认仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
 
-> **V0.2 仍需 VPS 试点验收。** 仓库包含自动测试和 Linux Nginx 集成测试，但这不等于已经完成真实域名的 ACME 签发、续签或生产 REALITY 验收。不要直接在唯一的生产入口上无备份执行。
+> **V0.3 仍需 VPS 试点验收。** 仓库包含自动测试和 Linux Nginx 集成测试，但这不等于已经完成真实域名的 ACME 签发、续签或生产 REALITY 验收。不要直接在唯一的生产入口上无备份执行。
 
 ## 设计边界
 
@@ -60,6 +60,8 @@ ToastWeb 使用独立的 `toastweb-nginx.service` 和 `/etc/toastweb/nginx.conf`
 
 已有安装重装时，`auto` 会保留原主题；旧版没有主题字段的站点按 `notes` 保留，不会因升级而更换页面。自定义内容也不会被静默替换。
 
+**内置模板只适合作为起步和自检内容，正式节点建议发布自己的静态内容。** 默认公开页面不再展示部署器名称或管理命令，但共享的 HTML/CSS/图标仍可被关联；这不是去指纹或抗识别保证。升级不会擅自覆盖你已有的站点标题，可通过 `--title` 显式调整。
+
 所有主题均为本地 HTML/CSS/SVG，无第三方字体、脚本、追踪或假登录表单。`status` 不编造在线率，`api` 不伪造认证接口；它展示的元数据是静态文件，不是实时健康探测。
 
 ### 预览
@@ -93,7 +95,7 @@ ToastWeb 使用独立的 `toastweb-nginx.service` 和 `/etc/toastweb/nginx.conf`
 5. 检查旧 acme.sh、Certbot standalone、其他网站是否需要独占 80。
 6. 保持已有代理和客户端配置不变，先完成网站独立验收。
 
-DNS 检查要求系统解析出的全部 A/AAAA 都指向本机。NAT 环境可明确提供 `--expected-ip`。本机 HTTP 探测不等同于从公网成功访问，最终仍由 CA 验证。
+DNS 检查要求系统解析出的全部 A/AAAA 都指向本机。NAT 环境可明确提供 `--expected-ip`：只有显式提供、且不是本机地址的连接建立失败会降为警告，以兼容不支持 NAT 回环的网络。本机/回环地址仍严格检查；连接成功后的 HTTP 错误、协议故障或验证 token 不匹配仍会终止安装。本机探测不等同于公网可达，最终仍须通过 CA 验证，不能借此绕过证书签发。
 
 ## 快速开始
 
@@ -110,7 +112,7 @@ python3 toastweb.py plan --domain docs.example.org --email you@example.org
 sudo bash install.sh
 ```
 
-如果仓库仍为私有，需要先为 VPS 配置只读 GitHub 凭据/部署密钥，或通过可信渠道上传项目；不要把 GitHub Token 写进 clone URL。改成公开仓库后可匿名拉取。
+仓库已公开，可匿名拉取，不需要向 VPS 分发 GitHub Token 或部署密钥。
 
 非交互式部署示例：
 
@@ -144,9 +146,9 @@ sudo toastweb doctor
 sudo toastweb renew-test
 ```
 
-- `doctor`：检查配置、服务、续期定时器、证书有效性及可信 TLS 1.3 + h2 握手。
+- `doctor`：检查配置、服务、文件描述符预算、续期定时器、证书有效性及可信 TLS 1.3 + h2 握手。
 - `renew-test`：通过 CA 测试环境演练 HTTP-01 续期，不替换现有正式证书；默认不执行部署 hook。
-- 再人工验证未知 SNI 被拒绝、网站内容正常、端口只按计划暴露，以及 MLKEM 是否满足要求。
+- 再人工验证未知 SNI、正确 SNI 配错误 Host 均被拒绝，目录跳转不带出后端端口；检查内容、监听范围及 MLKEM 是否满足要求。
 
 **此时浏览器访问公网 443 可能仍显示旧目标站点或握手失败，这是尚未切换 REALITY 的预期。** 可以先通过 SSH 隧道检查后端：
 
@@ -169,6 +171,18 @@ curl --resolve notes.example.org:18443:127.0.0.1 https://notes.example.org:18443
 ```
 
 同步更新所有相关客户端/订阅的 SNI，保留原目标的回滚配置；不要丢失已有 sockopt。ToastWeb 不执行这一步。
+
+### 可选的 HTTP→HTTPS 跳转
+
+默认维持 80 普通路径返回 404，不能把回环 TLS 就绪当成公网 443 已经切换。**完成入口与客户端切换，并从外网核对该域名的可信证书和实际页面内容后**，才可主动开启：
+
+```bash
+sudo toastweb http-redirect enable --confirm-public-https
+# 需要回滚入口前，先关闭跳转。
+sudo toastweb http-redirect disable
+```
+
+确认参数仅表示你的人工确认，不是程序完成了公网验证。跳转固定到已配置域名，不信任任意 Host；HTTP-01 验证路径仍直接服务文件。该设置会在重装中保留，开启/关闭失败会尝试恢复原配置。
 
 ## 内容更新和回滚
 
@@ -193,6 +207,22 @@ sudo toastweb rollback
 
 在源码目录执行 `python3 toastweb.py update` 可发布源码中的当前主题，省略 `--theme` 时保留已有主题。项目程序升级需要先审阅 `git pull` 的变更，再按原参数重新执行安装；域名/端口迁移仍不自动进行。
 
+## 历史版本与连接预算
+
+成功安装、内容更新/回滚或跳转策略变更后，在同一操作锁内清理**已登记所有权**的历史记录。默认保留最近 5 个内容版本及 5 份配置备份；当前版本、前一版本、当前链接和保留备份引用的版本额外保护，因此实际数量可能更多。失败事务不会触发清理；发布已成功而清理失败时仅警告，不回滚工作中的站点。
+
+旧版未登记的目录、无法确认归属的记录和顶层符号链接不自动删除；可识别的旧备份引用也会保护对应内容。待删除目录中存在嵌套符号链接时停止清理，交由人工检查。证书、ACME 账户、其他项目及共享依赖不属于清理范围。该机制不是磁盘硬配额，也不取代异机备份。
+
+```bash
+# 默认仅预览；--apply 才删除，删除不可撤销。
+sudo toastweb prune
+sudo toastweb prune --keep-releases 5 --keep-backups 5 --apply
+```
+
+安装参数 `--keep-releases N --keep-backups N` 可持久化保留策略（各 1–50）；重装未指定时保留已有设置。`prune` 的同名参数只用于本次操作。
+
+`worker_connections` 默认仍为 **512**，不把提高参数当成已经解决瓶颈。确有并发需求时，可在安装/重装命令中加入 `--worker-connections 2048`（允许 64–8192）。程序同步设置独立服务的 `LimitNOFILE` 与 Nginx worker 文件描述符上限为 `max(4096, 4 × worker_connections)`；`doctor` 检查服务配置预算。提高上限仍需评估系统硬限制、内存、实际连接/文件占用和压力测试，当前没有生产容量或吞吐提升结论。
+
 ## 文件和服务
 
 | 路径/名称 | 用途 |
@@ -204,7 +234,8 @@ sudo toastweb rollback
 | `/srv/toastweb/releases/*` | 静态内容版本 |
 | `/srv/toastweb/current` | 当前版本符号链接 |
 | `/var/lib/toastweb/acme` | HTTP-01 验证目录 |
-| `/var/lib/toastweb/backups` | 配置备份，0700 |
+| `/var/lib/toastweb/backups` | 配置备份及引用清单，0700 |
+| `/var/lib/toastweb/release-records` | 私有内容所有权登记，0700；不放在公开站点中 |
 | `/var/log/toastweb` | 网站日志；logrotate 保留 7 份 |
 | `/etc/letsencrypt/live/toastweb-<domain>` | Certbot 管理的证书 |
 | `toastweb-nginx.service` | 网站服务，不是发行版 nginx.service |
@@ -222,7 +253,7 @@ sudo toastweb rollback
 - APT 中断可能需要管理员修复；不会自动卸载系统软件包。
 - 包安装期间会临时创建 `/usr/sbin/policy-rc.d` 阻止服务自动启动/重启，并在正常异常退出时清理。断电或 SIGKILL 可能留下它：管理员应核实其包含 `Temporary ToastWeb package-install guard` 标记后再清理，不能盲目删除已有管理员策略。
 - 续签失败需检查 journal 和 DNS/80/CAA/CA 限流等原因。创建 timer 不代表永远续签成功。
-- V1 不提供自动清理/卸载命令，避免误删共享依赖或仍在使用的证书。请按文件清单人工审查清理，先处理仍在引用该网站的 REALITY。
+- 历史清理只管理本项目已登记的内容/配置备份，不提供自动卸载。移除网站仍需按文件清单人工审查，先处理仍在引用该网站的 REALITY，不能误删共享依赖或证书。
 
 ## 开发与测试
 
@@ -232,8 +263,11 @@ sudo toastweb rollback
 python3 -m unittest discover -s tests -v
 bash -n install.sh
 
-# 可选：Linux 测试机已安装 Nginx/OpenSSL 时开启真实进程集成测试。
-TOASTWEB_LIVE_NGINX=1 python3 -m unittest discover -s tests -v
+# 可选：Linux 测试机安装 Nginx/OpenSSL，以及开发依赖后运行真实进程测试。
+python3 -m venv /tmp/toastweb-tests
+/tmp/toastweb-tests/bin/pip install -r requirements-dev.txt
+TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tests -v
+sudo env TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tests -v
 ```
 
 开发者如需重建预览截图，需要在电脑上准备 Node 22+ 和 Chromium/Chrome/Edge，然后运行：
@@ -244,7 +278,7 @@ python3 tools/preview_themes.py
 
 该工具使用全新浏览器配置、回环临时站点及 CDP 的精确视口模拟，检查 1440px / 390px 视口没有文档级横向溢出。它不属于 VPS 安装依赖，不使用你的浏览器登录状态。
 
-集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上执行这些测试；Debian 13 的首次真实 VPS 试点仍需单独验收。初版测试记录见 [TESTING.md](TESTING.md)。
+集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上分别以非 root 和 root 运行完整测试，后者核对 Nginx worker 实际降权为 www-data；`h2` 包仅用于开发测试，不是 VPS 依赖。Debian 13 的首次真实 VPS 试点仍需单独验收。初版测试记录见 [TESTING.md](TESTING.md)。
 
 ## 安全与许可
 

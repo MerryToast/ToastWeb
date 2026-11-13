@@ -25,11 +25,9 @@
 └── assets/
     ├── site.css
     └── mark.svg</code></pre><p class="caption">示例目录用于说明组织方式，不是本站实际目录的完整披露。</p></section>
-      <section id="publishing"><div class="section-kicker">03 / PUBLISH</div><h2>更新应该可以回退</h2><p>在本地完成构建，只发布生成后的静态文件。不要把凭据、私钥、开发环境或未完成的草稿一起上传。</p><pre><code># 在安装了 ToastWeb 的服务器上发布已构建的目录
-sudo toastweb update --content-dir /path/to/public
-
-# 内容有误时，返回前一个版本
-sudo toastweb rollback</code></pre><div class="link-cards"><a href="#principles"><span class="card-icon">◇</span><strong>维护原则</strong><p>保持依赖和公开信息尽可能少。</p><span class="arrow">→</span></a><a href="#questions"><span class="card-icon">?</span><strong>常见问题</strong><p>了解这份静态手册的功能边界。</p><span class="arrow">→</span></a></div></section>
+      <section id="publishing"><div class="section-kicker">03 / PUBLISH</div><h2>更新应该可以回退</h2><p>在本地完成构建，只发布生成后的静态文件。不要把凭据、私钥、开发环境或未完成的草稿一起上传。</p><pre><code>发布前：检查本地构建结果，保留上一版内容。
+发布后：核对页面、导航和本地资源。
+发现问题：恢复上一版内容并重新检查。</code></pre><div class="link-cards"><a href="#principles"><span class="card-icon">◇</span><strong>维护原则</strong><p>保持依赖和公开信息尽可能少。</p><span class="arrow">→</span></a><a href="#questions"><span class="card-icon">?</span><strong>常见问题</strong><p>了解这份静态手册的功能边界。</p><span class="arrow">→</span></a></div></section>
       <section id="principles"><div class="section-kicker">04 / MAINTAIN</div><h2>把注意力留给内容</h2><ul class="checklist"><li><strong>本地资源：</strong>不加载广告、远程字体或第三方分析脚本。</li><li><strong>真实信息：</strong>没有接入监控时，不发布虚构的在线率或实时指标。</li><li><strong>有边界的公开：</strong>不要把管理入口、账号凭据和内部拓扑写进公开页面。</li><li><strong>定期检查：</strong>证书、链接和备份都需要持续维护。</li></ul></section>
       <section id="questions"><div class="section-kicker">05 / FAQ</div><h2>你可能会问</h2><details open><summary>这个页面需要账号或后端吗？</summary><p>不需要。这是一份只读静态手册，没有登录表单，也不保存访客输入。</p></details><details><summary>可以替换成自己的文档吗？</summary><p>可以。保留有效的导航和本地资源路径，发布你自己的静态目录即可。</p></details><details><summary>这份文档是否代表某项服务正在被实时监测？</summary><p>不是。页面只提供说明，不冒充监控系统或第三方产品。</p></details></section>
       <footer class="article-footer"><span>Page built {{BUILD_DATE}}</span><a href="#top">返回顶部 ↑</a></footer>

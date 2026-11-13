@@ -25,18 +25,19 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 OWNER = "ToastWeb"
 MARKER = "# Managed by ToastWeb; do not remove this ownership marker."
 SERVICE = "toastweb-nginx.service"
 RENEW_TIMER = "toastweb-renew.timer"
 SUPPORTED = {("debian", "13"), ("ubuntu", "24.04")}
 BUNDLE = Path(__file__).resolve().parent
+RELEASE_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{8}")
 THEMES = {
-    "docs": ("Toast Docs", "Clear guides for a small, well-kept corner of the web."),
+    "docs": ("Site Docs", "Clear guides for a small, well-kept corner of the web."),
     "status": ("Service Status", "Service information, maintenance notices, and published updates."),
-    "api": ("Toast API", "A small, read-only interface with clear examples and no hidden dependencies."),
-    "notes": ("Toast Notes", "A small place for notes, ideas, and useful things."),
+    "api": ("Site API", "A small, read-only interface with clear examples and no hidden dependencies."),
+    "notes": ("Site Notes", "A small place for notes, ideas, and useful things."),
 }
 
 
@@ -92,6 +93,14 @@ class Paths:
     @property
     def releases(self) -> Path:
         return self.at("/srv/toastweb/releases")
+
+    @property
+    def backups(self) -> Path:
+        return self.at("/var/lib/toastweb/backups")
+
+    @property
+    def release_records(self) -> Path:
+        return self.at("/var/lib/toastweb/release-records")
 
     @property
     def acme(self) -> Path:
@@ -164,6 +173,22 @@ def validate_port(value: int) -> int:
     return value
 
 
+def validate_connections(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 64 <= value <= 8192:
+        raise ToastError("worker_connections must be an integer between 64 and 8192.")
+    return value
+
+
+def file_limit(connections: int) -> int:
+    return max(4096, validate_connections(connections) * 4)
+
+
+def validate_keep(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 50:
+        raise ToastError("Retention counts must be integers between 1 and 50.")
+    return value
+
+
 def validate_text(value: str, maximum: int = 180) -> str:
     if not value.strip() or len(value) > maximum or any(ord(c) < 32 for c in value):
         raise ToastError(f"Site text must contain 1–{maximum} printable characters.")
@@ -205,16 +230,29 @@ def nginx_quote(path: Path) -> str:
     return '"' + value.replace("\\", "/").replace('"', '\\"') + '"'
 
 
-def render_nginx(paths: Paths, domain: str, port: int, *, tls: bool, modern_http2: bool, ipv6: bool) -> str:
+def render_nginx(
+    paths: Paths,
+    domain: str,
+    port: int,
+    *,
+    tls: bool,
+    modern_http2: bool,
+    ipv6: bool,
+    http_redirect: bool = False,
+    worker_connections: int = 512,
+) -> str:
     domain = normalize_domain(domain)
     validate_port(port)
+    validate_connections(worker_connections)
+    http_action = f"return 301 https://{domain}$request_uri;" if tls and http_redirect else "return 404;"
     ipv6_listen = "\n        listen [::]:80;" if ipv6 else ""
     text = f"""{MARKER}
 user www-data;
 worker_processes 1;
+worker_rlimit_nofile {file_limit(worker_connections)};
 pid /run/toastweb-nginx/nginx.pid;
 error_log {nginx_quote(paths.logs / "error.log")} warn;
-events {{ worker_connections 512; }}
+events {{ worker_connections {worker_connections}; }}
 http {{
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
@@ -237,7 +275,7 @@ http {{
             try_files $uri =404;
             limit_except GET HEAD {{ deny all; }}
         }}
-        location / {{ return 404; }}
+        location / {{ {http_action} }}
     }}
 """
     if tls:
@@ -248,6 +286,7 @@ http {{
         listen 127.0.0.1:{port} ssl default_server;
         ssl_reject_handshake on;
         ssl_protocols TLSv1.2 TLSv1.3;
+        return 444;
     }}
     server {{
         {listen}{http2}
@@ -262,9 +301,9 @@ http {{
         root {nginx_quote(paths.current)};
         index index.html;
         autoindex off;
+        absolute_redirect off;
         add_header X-Content-Type-Options nosniff always;
         add_header Referrer-Policy strict-origin-when-cross-origin always;
-        if ($host != "{domain}") {{ return 444; }}
         location / {{
             try_files $uri $uri/ =404;
             limit_except GET HEAD {{ deny all; }}
@@ -275,7 +314,7 @@ http {{
     return text + "}\n"
 
 
-def render_unit() -> str:
+def render_unit(worker_connections: int = 512) -> str:
     return f"""{MARKER}
 [Unit]
 Description=ToastWeb isolated Nginx website
@@ -285,6 +324,7 @@ After=network.target
 Type=forking
 PIDFile=/run/toastweb-nginx/nginx.pid
 RuntimeDirectory=toastweb-nginx
+LimitNOFILE={file_limit(worker_connections)}
 ExecStartPre=/usr/sbin/nginx -t -c /etc/toastweb/nginx.conf
 ExecStart=/usr/sbin/nginx -c /etc/toastweb/nginx.conf
 ExecReload=/usr/sbin/nginx -s reload -c /etc/toastweb/nginx.conf
@@ -368,7 +408,16 @@ def load_state(paths: Paths) -> dict[str, Any] | None:
     if state.get("managed_by") != OWNER:
         raise ToastError("Existing site.json is not owned by ToastWeb.")
     state["domain"] = normalize_domain(str(state.get("domain", "")))
-    validate_port(int(state.get("port", 0)))
+    port = state.get("port", 0)
+    if isinstance(port, bool) or not isinstance(port, int):
+        raise ToastError("Invalid backend port in installation state.")
+    validate_port(port)
+    state["worker_connections"] = validate_connections(state.get("worker_connections", 512))
+    state["keep_releases"] = validate_keep(state.get("keep_releases", 5))
+    state["keep_backups"] = validate_keep(state.get("keep_backups", 5))
+    if not isinstance(state.get("http_redirect", False), bool):
+        raise ToastError("Invalid HTTP redirect policy in installation state.")
+    state.setdefault("http_redirect", False)
     for key in ("active_release", "previous_release"):
         value = state.get(key)
         if value and not re.fullmatch(r"[A-Za-z0-9_-]+", str(value)):
@@ -443,6 +492,8 @@ def assert_owned(paths: Paths) -> None:
         paths.acme.parent,
         paths.acme,
         paths.logs,
+        paths.backups,
+        paths.release_records,
     ):
         if directory.is_symlink():
             raise ToastError(f"Refusing a symlink at a managed directory: {directory}")
@@ -513,6 +564,13 @@ def create_release(paths: Paths, source: Path, title: str, description: str, dom
                 text = text.replace(key, value)
             path.write_text(text, encoding="utf-8", newline="\n")
     destination.chmod(0o755)
+    if paths.release_records.is_symlink():
+        raise ToastError("Release registry must not be a symlink.")
+    paths.release_records.mkdir(parents=True, exist_ok=True)
+    paths.release_records.chmod(0o700)
+    write_atomic(
+        paths.release_records / (release + ".json"), json.dumps({"managed_by": OWNER, "release": release}) + "\n", 0o600
+    )
     return release
 
 
@@ -536,7 +594,7 @@ class Transaction:
 
     def __init__(self, paths: Paths) -> None:
         self.paths = paths
-        self.backup = paths.at("/var/lib/toastweb/backups") / (
+        self.backup = paths.backups / (
             dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         )
         self.files: list[tuple[Path, Path | None]] = []
@@ -548,7 +606,11 @@ class Transaction:
         self.timer_was_enabled = False
 
     def __enter__(self) -> Transaction:
-        self.backup.mkdir(parents=True, mode=0o700)
+        if self.paths.backups.is_symlink():
+            raise ToastError("Backup root must not be a symlink.")
+        self.paths.backups.mkdir(parents=True, exist_ok=True)
+        self.paths.backups.chmod(0o700)
+        self.backup.mkdir(mode=0o700)
         self.backup.chmod(0o700)
         self.was_active = run(["systemctl", "is-active", "--quiet", SERVICE], check=False).returncode == 0
         self.was_enabled = run(["systemctl", "is-enabled", "--quiet", SERVICE], check=False).returncode == 0
@@ -561,6 +623,12 @@ class Transaction:
             self.files.append((path, saved))
         if self.had_app:
             shutil.copytree(self.paths.app, self.backup / "app")
+        refs = release_references(read_json(self.paths.state)) if self.paths.state.exists() else set()
+        if self.old_link is not None:
+            refs.add(self.paths.current.resolve().name)
+        write_atomic(
+            self.backup / "manifest.json", json.dumps({"managed_by": OWNER, "release_refs": sorted(refs)}) + "\n", 0o600
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
@@ -604,6 +672,179 @@ class Transaction:
         except (OSError, ToastError) as rollback_error:
             print(f"Automatic recovery needs attention: {rollback_error}. Backup retained.", file=sys.stderr)
         return False
+
+
+def release_references(snapshot: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for key in ("active_release", "previous_release"):
+        value = snapshot.get(key)
+        if value:
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+                raise ToastError("Invalid release reference; refusing cleanup.")
+            refs.add(value)
+    return refs
+
+
+def history_directories(root: Path) -> list[Path]:
+    if root.is_symlink():
+        raise ToastError(f"History root must not be a symlink: {root}")
+    if not root.exists():
+        return []
+    return sorted(
+        (p for p in root.iterdir() if RELEASE_ID.fullmatch(p.name) and not p.is_symlink() and p.is_dir()),
+        key=lambda p: (p.stat().st_mtime_ns, p.name),
+        reverse=True,
+    )
+
+
+def checked_marker(path: Path) -> dict[str, Any] | None:
+    if path.is_symlink():
+        raise ToastError(f"History marker must not be a symlink: {path}")
+    if not path.is_file():
+        return None
+    data = read_json(path)
+    return data if data.get("managed_by") == OWNER else None
+
+
+def safe_history_tree(root: Path, target: Path) -> None:
+    if target.parent != root or target.is_symlink() or not target.resolve().is_relative_to(root.resolve()):
+        raise ToastError("Unsafe cleanup path; no deletion performed.")
+    for directory, dirs, files in os.walk(target, followlinks=False):
+        if any((Path(directory) / name).is_symlink() for name in [*dirs, *files]):
+            raise ToastError("History contains a symlink; inspect it manually before cleanup.")
+
+
+def registered_releases(paths: Paths, releases: list[Path]) -> list[Path]:
+    result: list[Path] = []
+    for directory in releases:
+        marker = checked_marker(paths.release_records / (directory.name + ".json"))
+        if marker:
+            if marker.get("release") != directory.name:
+                raise ToastError("Release registry mismatch; refusing cleanup.")
+            result.append(directory)
+    return result
+
+
+def backup_references(directory: Path, marker: dict[str, Any] | None) -> set[str]:
+    if marker:
+        refs = marker.get("release_refs", [])
+        if not isinstance(refs, list) or any(
+            not isinstance(r, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", r) for r in refs
+        ):
+            raise ToastError("Invalid backup references; refusing cleanup.")
+        return set(refs)
+    # v0.1/v0.2 used numbered snapshots: site.json was the second file.
+    legacy = checked_marker(directory / "1")
+    return release_references(legacy) if legacy else set()
+
+
+def prune_history(
+    paths: Paths, keep_releases: int = 5, keep_backups: int = 5, *, apply: bool = False
+) -> dict[str, Any]:
+    """Called only under the operation lock. Unknown/legacy directories are retained."""
+    validate_keep(keep_releases)
+    validate_keep(keep_backups)
+    if paths.release_records.is_symlink():
+        raise ToastError("Release registry must not be a symlink.")
+    state = load_state(paths)
+    if not state:
+        raise ToastError("No installation state; refusing cleanup.")
+    releases = history_directories(paths.releases)
+    backups = history_directories(paths.backups)
+    owned_releases = registered_releases(paths, releases)
+    manifests: dict[str, dict[str, Any]] = {}
+    for directory in backups:
+        marker = checked_marker(directory / "manifest.json")
+        if marker:
+            manifests[directory.name] = marker
+    registered_backups = [p for p in backups if p.name in manifests]
+    retained_backups = {p.name for p in registered_backups[:keep_backups]}
+    retained_backups.update(p.name for p in backups if p.name not in manifests)
+    protected = release_references(state)
+    if paths.current.is_symlink():
+        if not paths.current.resolve().is_relative_to(paths.releases.resolve()):
+            raise ToastError("Current release points outside history; refusing cleanup.")
+        protected.add(paths.current.resolve().name)
+    for directory in backups:
+        if directory.name not in retained_backups:
+            continue
+        protected.update(backup_references(directory, manifests.get(directory.name)))
+    retained_releases = protected | {p.name for p in owned_releases[:keep_releases]}
+    remove_releases = [p for p in owned_releases if p.name not in retained_releases]
+    remove_backups = [p for p in registered_backups if p.name not in retained_backups]
+    # Validate every deletion before changing anything; never follow nested links.
+    for directory in remove_backups:
+        safe_history_tree(paths.backups, directory)
+    for directory in remove_releases:
+        safe_history_tree(paths.releases, directory)
+    report = {
+        "applied": apply,
+        "remove_releases": [p.name for p in remove_releases],
+        "remove_backups": [p.name for p in remove_backups],
+        "protected_releases": sorted(protected),
+        "unregistered_releases_retained": len(releases) - len(owned_releases),
+        "unregistered_backups_retained": len(backups) - len(registered_backups),
+    }
+    if apply:
+        try:
+            for directory in remove_backups:
+                shutil.rmtree(directory)
+            for directory in remove_releases:
+                shutil.rmtree(directory)
+                (paths.release_records / (directory.name + ".json")).unlink()
+        except OSError as exc:
+            raise ToastError(
+                "History cleanup stopped after an I/O error and may be partially complete. Active content is unchanged."
+            ) from exc
+    return report
+
+
+def post_success_cleanup(paths: Paths) -> None:
+    # Publication has committed. Cleanup failure must not roll back a working site.
+    try:
+        state = load_state(paths)
+        if state:
+            prune_history(paths, state["keep_releases"], state["keep_backups"], apply=True)
+    except (OSError, ToastError, ValueError) as exc:
+        print(f"Warning: publication succeeded but history cleanup was skipped: {exc}", file=sys.stderr)
+
+
+def set_http_redirect(args: argparse.Namespace, paths: Paths) -> None:
+    require_host(paths)
+    enabled = args.mode == "enable"
+    if enabled and not args.confirm_public_https:
+        raise ToastError(
+            "First verify public HTTPS cutover, then explicitly pass --confirm-public-https. Local TLS readiness is not sufficient."
+        )
+    with operation_lock(paths):
+        assert_owned(paths)
+        state = load_state(paths)
+        if not state:
+            raise ToastError("ToastWeb is not installed.")
+        with Transaction(paths):
+            config = render_nginx(
+                paths,
+                state["domain"],
+                state["port"],
+                tls=True,
+                modern_http2=modern_nginx(),
+                ipv6=ipv6_available(),
+                http_redirect=enabled,
+                worker_connections=state["worker_connections"],
+            )
+            write_atomic(paths.config, config)
+            run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
+            run(["systemctl", "reload", SERVICE])
+            state.update(
+                http_redirect=enabled, version=VERSION, updated_at=dt.datetime.now(dt.timezone.utc).isoformat()
+            )
+            write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
+        post_success_cleanup(paths)
+    print(
+        "HTTP redirect enabled for the configured domain."
+        if enabled
+        else "HTTP redirect disabled; non-ACME requests return 404."
+    )
 
 
 @contextlib.contextmanager
@@ -780,15 +1021,28 @@ def install_bundle(paths: Paths) -> None:
         raise ToastError("Cannot install the ToastWeb application bundle.") from exc
 
 
-def http_probe(paths: Paths, domain: str, addresses: set[str]) -> None:
+def http_probe(paths: Paths, domain: str, addresses: set[str], expected_ips: list[str] | None = None) -> None:
     relative = Path(".well-known/acme-challenge") / ("toastweb-probe-" + uuid.uuid4().hex)
     token = uuid.uuid4().hex
     challenge = paths.acme / relative
+    explicit = {str(ipaddress.ip_address(value)) for value in expected_ips or []}
+    local = local_addresses() if explicit else set()
+    nat_only = explicit - local - {"127.0.0.1", "::1"}
     write_atomic(challenge, token)
     try:
-        for address in {"127.0.0.1", *addresses}:
+        for address in sorted({"127.0.0.1", *addresses}):
             connection = http.client.HTTPConnection(address, 80, timeout=8)
             try:
+                try:
+                    connection.connect()
+                except OSError as exc:
+                    if address not in nat_only:
+                        raise
+                    print(
+                        f"Warning: cannot connect to explicitly configured NAT address {address} from this host ({type(exc).__name__}); the CA must still validate it.",
+                        file=sys.stderr,
+                    )
+                    continue
                 connection.request("GET", "/" + relative.as_posix(), headers={"Host": domain})
                 response = connection.getresponse()
                 if response.status != 200 or response.read(128).decode("ascii") != token:
@@ -854,6 +1108,22 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             )
         source, theme = select_content(domain, args.theme, args.content_dir, old)
         title, description = site_metadata(args.title, args.description, theme, old)
+        policy = old or {}
+        connections = validate_connections(
+            args.worker_connections if args.worker_connections is not None else policy.get("worker_connections", 512)
+        )
+        keep_releases = validate_keep(
+            args.keep_releases if args.keep_releases is not None else policy.get("keep_releases", 5)
+        )
+        keep_backups = validate_keep(
+            args.keep_backups if args.keep_backups is not None else policy.get("keep_backups", 5)
+        )
+        redirect = policy.get("http_redirect", False)
+        if theme is not None:
+            print(
+                "Warning: built-in templates are starter/self-check content with a recognizable shared layout. Use your own static content for production; removing branding does not remove fingerprints.",
+                file=sys.stderr,
+            )
         check_ports(port)
         addresses = check_dns(domain, args.expected_ip)
         check_other_acme(paths, args.allow_existing_acme)
@@ -872,9 +1142,19 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             lineage = paths.lineage(domain)
             bootstrap_tls = bool(old and (lineage / "fullchain.pem").exists() and (lineage / "privkey.pem").exists())
             write_atomic(
-                paths.config, render_nginx(paths, domain, port, tls=bootstrap_tls, modern_http2=modern, ipv6=ipv6)
+                paths.config,
+                render_nginx(
+                    paths,
+                    domain,
+                    port,
+                    tls=bootstrap_tls,
+                    modern_http2=modern,
+                    ipv6=ipv6,
+                    http_redirect=redirect,
+                    worker_connections=connections,
+                ),
             )
-            write_atomic(paths.unit, render_unit())
+            write_atomic(paths.unit, render_unit(connections))
             write_atomic(paths.renew_unit, render_renew_unit(domain))
             write_atomic(paths.renew_timer, render_renew_timer())
             write_atomic(
@@ -886,12 +1166,24 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "enable", "--now", SERVICE])
             run(["systemctl", "reload", SERVICE])
-            http_probe(paths, domain, addresses)
+            http_probe(paths, domain, addresses, args.expected_ip)
             print("HTTP preflight passed locally; only the CA can verify Internet-wide port-80 reachability.")
             run(certbot_command(paths, domain, email), timeout=600)
             if not (lineage / "fullchain.pem").is_file() or not (lineage / "privkey.pem").is_file():
                 raise ToastError("Certbot did not create the expected certificate lineage.")
-            write_atomic(paths.config, render_nginx(paths, domain, port, tls=True, modern_http2=modern, ipv6=ipv6))
+            write_atomic(
+                paths.config,
+                render_nginx(
+                    paths,
+                    domain,
+                    port,
+                    tls=True,
+                    modern_http2=modern,
+                    ipv6=ipv6,
+                    http_redirect=redirect,
+                    worker_connections=connections,
+                ),
+            )
             write_atomic(paths.hook, render_hook(domain), 0o755)
             write_atomic(paths.logrotate, render_logrotate())
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
@@ -903,6 +1195,10 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 "domain": domain,
                 "email": email,
                 "port": port,
+                "worker_connections": connections,
+                "http_redirect": redirect,
+                "keep_releases": keep_releases,
+                "keep_backups": keep_backups,
                 "title": title,
                 "description": description,
                 "content_type": "custom" if args.content_dir else "builtin",
@@ -914,6 +1210,7 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             }
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
+        post_success_cleanup(paths)
         print(f"Ready: HTTPS backend 127.0.0.1:{port}, SNI {domain}.")
         print("REALITY/DNS/firewall were NOT modified. Coordinate client SNI and Xray changes separately.")
         print("Next: sudo toastweb doctor && sudo toastweb renew-test")
@@ -958,6 +1255,7 @@ def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) ->
                 updated_at=dt.datetime.now(dt.timezone.utc).isoformat(),
             )
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
+        post_success_cleanup(paths)
         print(f"Active content release: {release}")
 
 
@@ -971,6 +1269,10 @@ def status(paths: Paths) -> None:
             "version",
             "domain",
             "port",
+            "worker_connections",
+            "http_redirect",
+            "keep_releases",
+            "keep_backups",
             "content_type",
             "theme",
             "previous_theme",
@@ -993,6 +1295,16 @@ def doctor(paths: Paths) -> None:
     run(["systemctl", "is-active", "--quiet", SERVICE])
     run(["systemctl", "is-enabled", "--quiet", RENEW_TIMER])
     run(["systemctl", "is-active", "--quiet", RENEW_TIMER])
+    limit = run(["systemctl", "show", SERVICE, "--property=LimitNOFILESoft", "--value"]).stdout.strip()
+    if limit != "infinity":
+        try:
+            sufficient = int(limit) >= file_limit(state["worker_connections"])
+        except ValueError:
+            sufficient = False
+        if not sufficient:
+            raise ToastError(
+                "Service file-descriptor limit is below the configured connection budget; reinstall the updated unit."
+            )
     certificate = paths.lineage(state["domain"]) / "fullchain.pem"
     run(["openssl", "x509", "-in", str(certificate), "-noout", "-checkend", "0"])
     run(["openssl", "x509", "-in", str(certificate), "-noout", "-checkhost", state["domain"]])
@@ -1041,6 +1353,17 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--email")
         sub.add_argument("--port", type=int, default=8443)
         sub.add_argument(
+            "--worker-connections",
+            type=int,
+            help="64–8192; default 512 or existing setting; paired with a file-descriptor budget",
+        )
+        sub.add_argument(
+            "--keep-releases",
+            type=int,
+            help="Keep at least this many registered releases (1–50; default 5), plus rollback dependencies",
+        )
+        sub.add_argument("--keep-backups", type=int, help="Keep this many registered backups (1–50; default 5)")
+        sub.add_argument(
             "--theme",
             choices=["auto", *THEMES],
             default="auto",
@@ -1061,6 +1384,17 @@ def parser() -> argparse.ArgumentParser:
     sub = commands.add_parser("update", help="Publish static content without changing certificate or domain")
     sub.add_argument("--content-dir")
     sub.add_argument("--theme", choices=list(THEMES), help="Explicitly switch the built-in template")
+    sub = commands.add_parser("http-redirect", help="Set HTTP redirect policy only after public HTTPS cutover")
+    sub.add_argument("mode", choices=["enable", "disable"])
+    sub.add_argument(
+        "--confirm-public-https",
+        action="store_true",
+        help="Your explicit confirmation that public HTTPS serves this site; not an automatic probe",
+    )
+    sub = commands.add_parser("prune", help="Preview retention cleanup; deletes nothing unless --apply is specified")
+    sub.add_argument("--keep-releases", type=int)
+    sub.add_argument("--keep-backups", type=int)
+    sub.add_argument("--apply", action="store_true")
     for name in ("rollback", "status", "doctor", "renew-test"):
         commands.add_parser(name)
     return result
@@ -1079,6 +1413,11 @@ def main(argv: list[str] | None = None) -> int:
             args.domain = normalize_domain(args.domain)
             args.email = validate_email(args.email)
             validate_port(args.port)
+            if args.worker_connections is not None:
+                validate_connections(args.worker_connections)
+            for value in (args.keep_releases, args.keep_backups):
+                if value is not None:
+                    validate_keep(value)
             if args.title is not None:
                 validate_text(args.title)
             if args.description is not None:
@@ -1098,6 +1437,13 @@ def main(argv: list[str] | None = None) -> int:
                         "https_backend": f"127.0.0.1:{args.port}",
                         "http_validation_port": 80,
                         "certificate_method": "HTTP-01 webroot",
+                        "worker_connections": args.worker_connections if args.worker_connections is not None else 512,
+                        "file_descriptor_limit": file_limit(
+                            args.worker_connections if args.worker_connections is not None else 512
+                        ),
+                        "http_redirect": False,
+                        "keep_releases": args.keep_releases if args.keep_releases is not None else 5,
+                        "keep_backups": args.keep_backups if args.keep_backups is not None else 5,
                         "service": SERVICE,
                         "changes": [
                             "APT dependencies",
@@ -1122,6 +1468,22 @@ def main(argv: list[str] | None = None) -> int:
             doctor(paths)
         elif args.command == "renew-test":
             renew_test(paths)
+        elif args.command == "http-redirect":
+            set_http_redirect(args, paths)
+        elif args.command == "prune":
+            require_host(paths)
+            with operation_lock(paths):
+                assert_owned(paths)
+                state = load_state(paths)
+                if not state:
+                    raise ToastError("ToastWeb is not installed.")
+                report = prune_history(
+                    paths,
+                    args.keep_releases if args.keep_releases is not None else state["keep_releases"],
+                    args.keep_backups if args.keep_backups is not None else state["keep_backups"],
+                    apply=args.apply,
+                )
+                print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     except (ToastError, OSError, ValueError) as exc:
         print(f"ToastWeb: {exc}", file=sys.stderr)

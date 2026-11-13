@@ -30,6 +30,8 @@ def free_port() -> int:
 
 @unittest.skipUnless(LIVE, "Set TOASTWEB_LIVE_NGINX=1 on Linux with Nginx/OpenSSL installed")
 class NginxIntegrationTests(unittest.TestCase):
+    redirect = False
+
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
@@ -39,6 +41,9 @@ class NginxIntegrationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="toastweb-nginx-test-")
         cls.addClassCleanup(temporary.cleanup)
         cls.root = Path(temporary.name)
+        # Root Nginx drops workers to www-data. Only the public traversal root
+        # changes: certificate keys, state and backup permissions stay private.
+        cls.root.chmod(0o755)
         cls.paths = tw.Paths(cls.root)
         cls.paths.logs.mkdir(parents=True)
         cls.paths.acme.mkdir(parents=True)
@@ -47,7 +52,8 @@ class NginxIntegrationTests(unittest.TestCase):
         while cls.http_port == cls.https_port:
             cls.https_port = free_port()
         lineage = cls.paths.lineage("notes.example.org")
-        lineage.mkdir(parents=True)
+        lineage.mkdir(parents=True, mode=0o700)
+        lineage.chmod(0o700)
         generated = subprocess.run(
             [
                 "openssl",
@@ -74,6 +80,7 @@ class NginxIntegrationTests(unittest.TestCase):
         )
         if generated.returncode:
             raise RuntimeError("Test certificate generation failed: " + generated.stderr)
+        (lineage / "privkey.pem").chmod(0o600)
         cls.certificate = lineage / "fullchain.pem"
         release = tw.create_release(
             cls.paths, tw.BUNDLE / "site", "Test Notes", "Integration fixture", "notes.example.org", builtin=True
@@ -82,7 +89,13 @@ class NginxIntegrationTests(unittest.TestCase):
         tw.activate_release(cls.paths, release)
         tw.write_atomic(cls.paths.acme / ".well-known/acme-challenge/test-token", "HTTP01_OK")
         config = tw.render_nginx(
-            cls.paths, "notes.example.org", cls.https_port, tls=True, modern_http2=tw.modern_nginx(), ipv6=False
+            cls.paths,
+            "notes.example.org",
+            cls.https_port,
+            tls=True,
+            modern_http2=tw.modern_nginx(),
+            ipv6=False,
+            http_redirect=cls.redirect,
         )
         config = config.replace("listen 80", f"listen 127.0.0.1:{cls.http_port}")
         config = config.replace("pid /run/toastweb-nginx/nginx.pid;", f"pid {tw.nginx_quote(cls.root / 'nginx.pid')};")
@@ -138,10 +151,72 @@ class NginxIntegrationTests(unittest.TestCase):
             self.assertEqual(response.read(), b"HTTP01_OK")
             connection.request("GET", "/", headers={"Host": "notes.example.org"})
             response = connection.getresponse()
-            self.assertEqual(response.status, 404)
+            self.assertEqual(response.status, 301 if self.redirect else 404)
+            if self.redirect:
+                self.assertEqual(response.getheader("Location"), "https://notes.example.org/")
             response.read()
         finally:
             connection.close()
+
+    def test_worker_identity_and_private_key_permissions(self) -> None:
+        import pwd
+
+        expected = pwd.getpwnam("www-data").pw_uid if os.geteuid() == 0 else os.geteuid()
+        children = Path(f"/proc/{self.process.pid}/task/{self.process.pid}/children").read_text().split()
+        self.assertTrue(children)
+        for pid in children:
+            uid_line = next(
+                line for line in Path(f"/proc/{pid}/status").read_text().splitlines() if line.startswith("Uid:")
+            )
+            self.assertEqual(int(uid_line.split()[1]), expected)
+        self.assertEqual(self.certificate.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.certificate.parent / "privkey.pem").stat().st_mode & 0o777, 0o600)
+
+    def test_directory_redirect_is_relative(self) -> None:
+        for method in ("GET", "HEAD"):
+            with self.subTest(method=method):
+                status, headers, _ = self.request_backend("/assets", method)
+                self.assertEqual(status, 301)
+                self.assertEqual(headers["Location"], "/assets/")
+                self.assertNotIn(str(self.https_port), headers["Location"])
+
+    def test_wrong_host_with_valid_sni_is_closed(self) -> None:
+        for host in ("wrong.example.org", "127.0.0.1"):
+            with self.subTest(host=host), self.assertRaises(http.client.RemoteDisconnected):
+                self.request_backend("/", host=host)
+
+    def test_http2_wrong_authority_with_valid_sni_is_closed(self) -> None:
+        from h2.config import H2Configuration
+        from h2.connection import H2Connection
+        from h2.events import ConnectionTerminated, ResponseReceived, StreamEnded, StreamReset
+
+        context = ssl.create_default_context(cafile=str(self.certificate))
+        context.set_alpn_protocols(["h2"])
+        with (
+            socket.create_connection(("127.0.0.1", self.https_port), timeout=5) as tcp,
+            context.wrap_socket(tcp, server_hostname="notes.example.org") as tls,
+        ):
+            self.assertEqual(tls.selected_alpn_protocol(), "h2")
+            client = H2Connection(config=H2Configuration(client_side=True))
+            client.initiate_connection()
+            client.send_headers(
+                1,
+                [(":method", "GET"), (":scheme", "https"), (":authority", "wrong.example.org"), (":path", "/")],
+                end_stream=True,
+            )
+            tls.sendall(client.data_to_send())
+            for _ in range(20):
+                payload = tls.recv(65536)
+                if not payload:
+                    return
+                events = client.receive_data(payload)
+                self.assertFalse(
+                    any(isinstance(event, ResponseReceived) for event in events),
+                    "Unexpected HTTP response for an unknown authority",
+                )
+                if any(isinstance(event, (StreamReset, StreamEnded, ConnectionTerminated)) for event in events):
+                    return
+            self.fail("No rejection received for an unknown HTTP/2 authority")
 
     def test_tls13_and_h2(self) -> None:
         context = ssl.create_default_context(cafile=str(self.certificate))
@@ -174,14 +249,16 @@ class NginxIntegrationTests(unittest.TestCase):
                 self.assertEqual(response.status, expected)
                 response.read()
 
-    def request_backend(self, path: str, method: str = "GET") -> tuple[int, dict[str, str], bytes]:
+    def request_backend(
+        self, path: str, method: str = "GET", host: str = "notes.example.org"
+    ) -> tuple[int, dict[str, str], bytes]:
         context = ssl.create_default_context(cafile=str(self.certificate))
         context.set_alpn_protocols(["http/1.1"])
         with (
             socket.create_connection(("127.0.0.1", self.https_port), timeout=5) as tcp,
             context.wrap_socket(tcp, server_hostname="notes.example.org") as tls,
         ):
-            request = f"{method} {path} HTTP/1.1\r\nHost: notes.example.org\r\nConnection: close\r\n\r\n"
+            request = f"{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
             tls.sendall(request.encode("ascii"))
             response = http.client.HTTPResponse(tls, method=method)
             response.begin()
@@ -226,6 +303,12 @@ class NginxIntegrationTests(unittest.TestCase):
                 connection.getresponse()
         finally:
             connection.close()
+
+
+class RedirectNginxIntegrationTests(NginxIntegrationTests):
+    """Run the same real Nginx checks with the optional HTTP redirect enabled."""
+
+    redirect = True
 
 
 if __name__ == "__main__":

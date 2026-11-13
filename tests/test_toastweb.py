@@ -360,6 +360,35 @@ class InstallTransactionTests(unittest.TestCase):
         for theme in ("docs", "status", "api"):
             self.assertTrue((self.paths.app / "themes" / theme / "index.html").is_file())
 
+    def test_policy_persistence_and_private_history_permissions(self) -> None:
+        self.args.worker_connections = 2048
+        self.args.keep_releases = 1
+        self.args.keep_backups = 2
+        tw.install(self.args, self.paths)
+        tw.set_http_redirect(argparse.Namespace(mode="enable", confirm_public_https=True), self.paths)
+        self.args.worker_connections = self.args.keep_releases = self.args.keep_backups = None
+        tw.install(self.args, self.paths)
+        state = tw.load_state(self.paths) or self.fail("Missing reinstalled state")
+        self.assertEqual((state["worker_connections"], state["keep_releases"], state["keep_backups"]), (2048, 1, 2))
+        self.assertTrue(state["http_redirect"])
+        self.assertIn("worker_connections 2048;", self.paths.config.read_text())
+        self.assertIn("LimitNOFILE=8192", self.paths.unit.read_text())
+        for directory in (self.paths.release_records, self.paths.backups, *self.paths.backups.iterdir()):
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+        for directory in self.paths.backups.iterdir():
+            self.assertEqual((directory / "manifest.json").stat().st_mode & 0o777, 0o600)
+            for release in tw.read_json(directory / "manifest.json")["release_refs"]:
+                self.assertTrue((self.paths.releases / release).is_dir())
+
+    def test_failed_transaction_never_runs_retention_cleanup(self) -> None:
+        tw.install(self.args, self.paths)
+        before = tw.load_state(self.paths)
+        self.fail_reload = True
+        with mock.patch.object(tw, "prune_history") as cleanup, self.assertRaises(tw.ToastError):
+            tw.update(argparse.Namespace(content_dir=None, theme="api"), self.paths)
+        cleanup.assert_not_called()
+        self.assertEqual(tw.load_state(self.paths), before)
+
     def test_theme_switch_rollback_and_failure_recovery(self) -> None:
         tw.install(self.args, self.paths)
         original = tw.load_state(self.paths) or self.fail("Missing initial state")
