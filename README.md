@@ -66,19 +66,19 @@ ToastWeb 使用独立的 `toastweb-nginx.service` 和 `/etc/toastweb/nginx.conf`
 
 以下为真实浏览器渲染截图，使用示例域名，不包含生产配置：
 
-**docs**
+#### docs
 
 ![docs 桌面预览](.github/previews/docs.png)
 
 [查看 docs 窄屏预览](.github/previews/docs-mobile.png)
 
-**status**
+#### status
 
 ![status 桌面预览](.github/previews/status.png)
 
 [查看 status 窄屏预览](.github/previews/status-mobile.png)
 
-**api**
+#### api
 
 ![api 桌面预览](.github/previews/api.png)
 

@@ -8,7 +8,8 @@
 - 使用 CDP 视口模拟，避免 Windows 无头浏览器最小窗口宽度造成错误的窄屏截图。
 - 桌面/窄屏截图保存在 `.github/previews/`，仅使用示例域名，不含生产状态。
 - 新增前缀匹配、手动覆盖、旧 notes 迁移、主题切换/回滚/失败恢复、自定义内容保护、本地资源/锚点检查和 API 元数据检查。
-- Linux 集成测试新增三套实际站点的 HTML/CSS/SVG 与 `/meta.json` GET/HEAD 验证；结果以[当前提交的 Actions](https://github.com/MerryToast/ToastWeb/actions)为准。
+- Linux 集成测试新增三套实际站点的 HTML/CSS/SVG 与 `/meta.json` GET/HEAD 验证。
+- [三模板首轮 CI](https://github.com/MerryToast/ToastWeb/actions/runs/43356164343) 的 48 项测试全部通过；包含旧版升级、主题切换/回滚和模拟失败恢复。后续变更以[当前提交的 Actions](https://github.com/MerryToast/ToastWeb/actions)为准。
 
 ## 0.1：初版历史记录
 
