@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ToastWeb: an isolated Nginx static site with HTTP-01 certificate management."""
+
 from __future__ import annotations
 
 import argparse
@@ -40,6 +41,7 @@ class ToastError(RuntimeError):
 @dataclass(frozen=True)
 class Paths:
     """Production defaults; alternate roots are only used by isolated tests."""
+
     root: Path = Path("/")
 
     def at(self, value: str) -> Path:
@@ -101,12 +103,21 @@ class Paths:
         return self.at("/etc/letsencrypt/live/toastweb-" + domain)
 
     def managed_files(self) -> list[Path]:
-        return [self.config, self.state, self.unit, self.renew_unit, self.renew_timer,
-                self.executable, self.hook, self.logrotate]
+        return [
+            self.config,
+            self.state,
+            self.unit,
+            self.renew_unit,
+            self.renew_timer,
+            self.executable,
+            self.hook,
+            self.logrotate,
+        ]
 
 
-def run(args: list[str], *, check: bool = True, timeout: int = 120,
-        env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    args: list[str], *, check: bool = True, timeout: int = 120, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Never invoke a shell or print subprocess output containing arbitrary config."""
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False, env=env)
@@ -169,7 +180,9 @@ def write_atomic(path: Path, content: str, mode: int = 0o644) -> None:
         raise ToastError(f"Refusing to overwrite a symlink: {path}")
     temporary: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent, delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent, delete=False
+        ) as stream:
             temporary = Path(stream.name)
             stream.write(content)
         temporary.chmod(mode)
@@ -194,7 +207,7 @@ def render_nginx(paths: Paths, domain: str, port: int, *, tls: bool, modern_http
 user www-data;
 worker_processes 1;
 pid /run/toastweb-nginx/nginx.pid;
-error_log {nginx_quote(paths.logs / 'error.log')} warn;
+error_log {nginx_quote(paths.logs / "error.log")} warn;
 events {{ worker_connections 512; }}
 http {{
     include /etc/nginx/mime.types;
@@ -203,9 +216,9 @@ http {{
     sendfile on;
     keepalive_timeout 30;
     client_max_body_size 32k;
-    access_log {nginx_quote(paths.logs / 'access.log')};
+    access_log {nginx_quote(paths.logs / "access.log")};
     server {{
-        listen 80 default_server;{ipv6_listen.replace('[::]:80;', '[::]:80 default_server;')}
+        listen 80 default_server;{ipv6_listen.replace("[::]:80;", "[::]:80 default_server;")}
         server_name _;
         return 444;
     }}
@@ -233,8 +246,8 @@ http {{
     server {{
         {listen}{http2}
         server_name {domain};
-        ssl_certificate {nginx_quote(lineage / 'fullchain.pem')};
-        ssl_certificate_key {nginx_quote(lineage / 'privkey.pem')};
+        ssl_certificate {nginx_quote(lineage / "fullchain.pem")};
+        ssl_certificate_key {nginx_quote(lineage / "privkey.pem")};
         ssl_protocols TLSv1.2 TLSv1.3;
         # Keep OpenSSL default groups; do not accidentally remove MLKEM support.
         ssl_session_cache shared:ToastWebTLS:1m;
@@ -358,8 +371,15 @@ def load_state(paths: Paths) -> dict[str, Any] | None:
 
 
 def assert_owned(paths: Paths) -> None:
-    for directory in (paths.config.parent, paths.app, paths.current.parent, paths.releases,
-                      paths.acme.parent, paths.acme, paths.logs):
+    for directory in (
+        paths.config.parent,
+        paths.app,
+        paths.current.parent,
+        paths.releases,
+        paths.acme.parent,
+        paths.acme,
+        paths.logs,
+    ):
         if directory.is_symlink():
             raise ToastError(f"Refusing a symlink at a managed directory: {directory}")
     for path in paths.managed_files():
@@ -383,8 +403,14 @@ def assert_owned(paths: Paths) -> None:
 def prepare_public_paths(paths: Paths) -> None:
     # Static files must remain traversable by Nginx workers even with root umask 077.
     # Backups/state/private keys are not included and keep restrictive permissions.
-    directories = [paths.current.parent, paths.releases, paths.acme.parent, paths.acme,
-                   paths.acme / ".well-known", paths.acme / ".well-known/acme-challenge"]
+    directories = [
+        paths.current.parent,
+        paths.releases,
+        paths.acme.parent,
+        paths.acme,
+        paths.acme / ".well-known",
+        paths.acme / ".well-known/acme-challenge",
+    ]
     for directory in directories:
         if directory.is_symlink():
             raise ToastError(f"Refusing a symlink in public data directories: {directory}")
@@ -407,10 +433,12 @@ def create_release(paths: Paths, source: Path, title: str, description: str, dom
     destination = paths.releases / release
     prepare_public_paths(paths)
     shutil.copytree(source, destination)
-    substitutions = {"{{SITE_TITLE}}": html.escape(title, quote=True),
-                     "{{SITE_DESCRIPTION}}": html.escape(description, quote=True),
-                     "{{DOMAIN}}": html.escape(domain, quote=True),
-                     "{{YEAR}}": str(dt.datetime.now(dt.timezone.utc).year)}
+    substitutions = {
+        "{{SITE_TITLE}}": html.escape(title, quote=True),
+        "{{SITE_DESCRIPTION}}": html.escape(description, quote=True),
+        "{{DOMAIN}}": html.escape(domain, quote=True),
+        "{{YEAR}}": str(dt.datetime.now(dt.timezone.utc).year),
+    }
     for path in destination.rglob("*"):
         path.chmod(0o755 if path.is_dir() else 0o644)
         if builtin and path.suffix in {".html", ".xml", ".txt"}:
@@ -439,10 +467,12 @@ def activate_release(paths: Paths, release: str) -> None:
 
 class Transaction:
     """Recover project-owned config/content pointers, not APT or CA side effects."""
+
     def __init__(self, paths: Paths) -> None:
         self.paths = paths
         self.backup = paths.at("/var/lib/toastweb/backups") / (
-            dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8])
+            dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        )
         self.files: list[tuple[Path, Path | None]] = []
         self.old_link = os.readlink(paths.current) if paths.current.is_symlink() else None
         self.had_app = paths.app.exists()
@@ -548,7 +578,9 @@ def local_addresses() -> set[str]:
 
 def resolve_domain(domain: str) -> set[str]:
     try:
-        return {str(ipaddress.ip_address(item[4][0])) for item in socket.getaddrinfo(domain, 80, type=socket.SOCK_STREAM)}
+        return {
+            str(ipaddress.ip_address(item[4][0])) for item in socket.getaddrinfo(domain, 80, type=socket.SOCK_STREAM)
+        }
     except (OSError, ValueError) as exc:
         raise ToastError("Domain resolution failed; configure gray-cloud DNS before installing.") from exc
 
@@ -565,7 +597,9 @@ def check_dns(domain: str, expected: list[str]) -> set[str]:
             raise ToastError("--expected-ip must be a public address.")
         allowed.add(str(address))
     if not addresses or any(not ipaddress.ip_address(a).is_global or a not in allowed for a in addresses):
-        raise ToastError("All resolved A/AAAA addresses must point to this VPS. Check DNS-only mode, stale AAAA records, or specify --expected-ip for NAT.")
+        raise ToastError(
+            "All resolved A/AAAA addresses must point to this VPS. Check DNS-only mode, stale AAAA records, or specify --expected-ip for NAT."
+        )
     return addresses
 
 
@@ -580,20 +614,28 @@ def check_ports(port: int) -> None:
         except (ValueError, IndexError):
             continue
         if listening in {80, port} and not (main.isdecimal() and main != "0" and f"pid={main}," in line):
-            raise ToastError(f"TCP {listening} is already used by another service; ToastWeb will not stop or replace it.")
+            raise ToastError(
+                f"TCP {listening} is already used by another service; ToastWeb will not stop or replace it."
+            )
 
 
 def check_other_acme(paths: Paths, allowed: bool) -> None:
     standalone = False
     directory = paths.at("/etc/letsencrypt/renewal")
     if directory.exists():
-        standalone = any("authenticator = standalone" in p.read_text(encoding="utf-8")
-                         for p in directory.glob("*.conf") if not p.name.startswith("toastweb-"))
+        standalone = any(
+            "authenticator = standalone" in p.read_text(encoding="utf-8")
+            for p in directory.glob("*.conf")
+            if not p.name.startswith("toastweb-")
+        )
     cron = run(["crontab", "-l"], check=False).stdout if shutil.which("crontab") else ""
     legacy = paths.at("/root/.acme.sh/acme.sh").exists() or any(
-        "acme.sh" in line for line in cron.splitlines() if not line.lstrip().startswith("#"))
+        "acme.sh" in line for line in cron.splitlines() if not line.lstrip().startswith("#")
+    )
     if (legacy or standalone) and not allowed:
-        raise ToastError("Existing ACME/standalone certificate automation detected. Review possible port-80 conflicts first, then explicitly pass --allow-existing-acme if safe. No existing jobs were changed.")
+        raise ToastError(
+            "Existing ACME/standalone certificate automation detected. Review possible port-80 conflicts first, then explicitly pass --allow-existing-acme if safe. No existing jobs were changed."
+        )
 
 
 def ensure_dependencies(paths: Paths) -> None:
@@ -611,15 +653,20 @@ def ensure_dependencies(paths: Paths) -> None:
     fresh_certbot = not paths.at("/usr/bin/certbot").exists() and certbot_timer.stdout.strip() != "loaded"
     policy = paths.at("/usr/sbin/policy-rc.d")
     if policy.exists() or policy.is_symlink():
-        raise ToastError("An existing policy-rc.d will not be replaced. Install nginx/certbot/openssl/ca-certificates/iproute2 with service auto-start controlled by your administrator, then rerun.")
+        raise ToastError(
+            "An existing policy-rc.d will not be replaced. Install nginx/certbot/openssl/ca-certificates/iproute2 with service auto-start controlled by your administrator, then rerun."
+        )
     print("Installing required system packages; suppressing package-triggered service starts/restarts.")
     apt_env = dict(os.environ, DEBIAN_FRONTEND="noninteractive", NEEDRESTART_MODE="l")
     run(["apt-get", "update"], timeout=600, env=apt_env)
     body = "#!/bin/sh\n# Temporary ToastWeb package-install guard\nexit 101\n"
     try:
         write_atomic(policy, body, 0o755)
-        run(["apt-get", "install", "-y", "--no-install-recommends",
-             "-o", "Dpkg::Options::=--force-confold", *missing], timeout=900, env=apt_env)
+        run(
+            ["apt-get", "install", "-y", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", *missing],
+            timeout=900,
+            env=apt_env,
+        )
     finally:
         if policy.is_file() and policy.read_text(encoding="utf-8") == body:
             policy.unlink()
@@ -688,15 +735,36 @@ def http_probe(paths: Paths, domain: str, addresses: set[str]) -> None:
 
 
 def certbot_command(paths: Paths, domain: str, email: str) -> list[str]:
-    return ["certbot", "certonly", "--non-interactive", "--agree-tos", "--email", validate_email(email),
-            "--webroot", "--webroot-path", str(paths.acme), "--preferred-challenges", "http",
-            "--cert-name", "toastweb-" + normalize_domain(domain), "--domain", normalize_domain(domain),
-            "--keep-until-expiring", "--key-type", "ecdsa"]
+    return [
+        "certbot",
+        "certonly",
+        "--non-interactive",
+        "--agree-tos",
+        "--email",
+        validate_email(email),
+        "--webroot",
+        "--webroot-path",
+        str(paths.acme),
+        "--preferred-challenges",
+        "http",
+        "--cert-name",
+        "toastweb-" + normalize_domain(domain),
+        "--domain",
+        normalize_domain(domain),
+        "--keep-until-expiring",
+        "--key-type",
+        "ecdsa",
+    ]
 
 
 def confirm(args: argparse.Namespace) -> None:
-    for flag, prompt in (("accept_tos", "Agree to the Let's Encrypt subscriber agreement (https://letsencrypt.org/repository/)?"),
-                         ("confirm_port_80", "Confirm public TCP 80 is allowed and may remain available for automatic renewal? ToastWeb will NOT change your firewall.")):
+    for flag, prompt in (
+        ("accept_tos", "Agree to the Let's Encrypt subscriber agreement (https://letsencrypt.org/repository/)?"),
+        (
+            "confirm_port_80",
+            "Confirm public TCP 80 is allowed and may remain available for automatic renewal? ToastWeb will NOT change your firewall.",
+        ),
+    ):
         if getattr(args, flag):
             continue
         if args.non_interactive or not sys.stdin.isatty():
@@ -716,14 +784,18 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
         assert_owned(paths)
         old = load_state(paths)
         if old and (old["domain"] != domain or old["port"] != port):
-            raise ToastError("V1 manages one site. Domain/port migration requires an explicit manual plan; existing service was not changed.")
+            raise ToastError(
+                "V1 manages one site. Domain/port migration requires an explicit manual plan; existing service was not changed."
+            )
         check_ports(port)
         addresses = check_dns(domain, args.expected_ip)
         check_other_acme(paths, args.allow_existing_acme)
         confirm(args)
         source = Path(args.content_dir).resolve() if args.content_dir else BUNDLE / "site"
         if old and old.get("content_type") == "custom" and not args.content_dir:
-            raise ToastError("This site uses custom content; supply --content-dir to avoid replacing it with the default template.")
+            raise ToastError(
+                "This site uses custom content; supply --content-dir to avoid replacing it with the default template."
+            )
         if not (source / "index.html").is_file():
             raise ToastError("Content source must contain index.html.")
         ensure_dependencies(paths)
@@ -737,11 +809,17 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             activate_release(paths, release)
             lineage = paths.lineage(domain)
             bootstrap_tls = bool(old and (lineage / "fullchain.pem").exists() and (lineage / "privkey.pem").exists())
-            write_atomic(paths.config, render_nginx(paths, domain, port, tls=bootstrap_tls, modern_http2=modern, ipv6=ipv6))
+            write_atomic(
+                paths.config, render_nginx(paths, domain, port, tls=bootstrap_tls, modern_http2=modern, ipv6=ipv6)
+            )
             write_atomic(paths.unit, render_unit())
             write_atomic(paths.renew_unit, render_renew_unit(domain))
             write_atomic(paths.renew_timer, render_renew_timer())
-            write_atomic(paths.executable, f"#!/bin/sh\n{MARKER}\nexec /usr/bin/python3 /usr/local/lib/toastweb/toastweb.py \"$@\"\n", 0o755)
+            write_atomic(
+                paths.executable,
+                f'#!/bin/sh\n{MARKER}\nexec /usr/bin/python3 /usr/local/lib/toastweb/toastweb.py "$@"\n',
+                0o755,
+            )
             run(["systemctl", "daemon-reload"])
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "enable", "--now", SERVICE])
@@ -757,12 +835,20 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "reload", SERVICE])
             run(["systemctl", "enable", "--now", RENEW_TIMER])
-            state = {"managed_by": OWNER, "version": VERSION, "domain": domain, "email": email,
-                     "port": port, "title": title, "description": description,
-                     "content_type": "custom" if args.content_dir else "builtin",
-                     "active_release": release, "previous_release": old.get("active_release") if old else None,
-                     "previous_content_type": old.get("content_type") if old else None,
-                     "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+            state = {
+                "managed_by": OWNER,
+                "version": VERSION,
+                "domain": domain,
+                "email": email,
+                "port": port,
+                "title": title,
+                "description": description,
+                "content_type": "custom" if args.content_dir else "builtin",
+                "active_release": release,
+                "previous_release": old.get("active_release") if old else None,
+                "previous_content_type": old.get("content_type") if old else None,
+                "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            }
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
         print(f"Ready: HTTPS backend 127.0.0.1:{port}, SNI {domain}.")
         print("REALITY/DNS/firewall were NOT modified. Coordinate client SNI and Xray changes separately.")
@@ -788,13 +874,19 @@ def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) ->
                 if state.get("content_type") == "custom" and not args.content_dir:
                     raise ToastError("Supply --content-dir for a custom website.")
                 source = Path(args.content_dir).resolve() if args.content_dir else BUNDLE / "site"
-                release = create_release(paths, source, state["title"], state["description"], state["domain"], builtin=not args.content_dir)
+                release = create_release(
+                    paths, source, state["title"], state["description"], state["domain"], builtin=not args.content_dir
+                )
                 state["content_type"] = "custom" if args.content_dir else "builtin"
             activate_release(paths, release)
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "reload", SERVICE])
-            state.update(active_release=release, previous_release=previous, previous_content_type=previous_type,
-                         updated_at=dt.datetime.now(dt.timezone.utc).isoformat())
+            state.update(
+                active_release=release,
+                previous_release=previous,
+                previous_content_type=previous_type,
+                updated_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            )
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
         print(f"Active content release: {release}")
 
@@ -803,7 +895,10 @@ def status(paths: Paths) -> None:
     state = load_state(paths)
     if not state:
         raise ToastError("ToastWeb is not installed.")
-    visible = {k: state.get(k) for k in ("version", "domain", "port", "content_type", "active_release", "previous_release", "updated_at")}
+    visible = {
+        k: state.get(k)
+        for k in ("version", "domain", "port", "content_type", "active_release", "previous_release", "updated_at")
+    }
     visible["service"] = run(["systemctl", "is-active", SERVICE], check=False).stdout.strip()
     visible["renewal_timer"] = run(["systemctl", "is-active", RENEW_TIMER], check=False).stdout.strip()
     print(json.dumps(visible, ensure_ascii=False, indent=2))
@@ -824,14 +919,19 @@ def doctor(paths: Paths) -> None:
     context = ssl.create_default_context()
     context.set_alpn_protocols(["h2", "http/1.1"])
     try:
-        with socket.create_connection(("127.0.0.1", state["port"]), timeout=8) as tcp, context.wrap_socket(tcp, server_hostname=state["domain"]) as tls:
+        with (
+            socket.create_connection(("127.0.0.1", state["port"]), timeout=8) as tcp,
+            context.wrap_socket(tcp, server_hostname=state["domain"]) as tls,
+        ):
             if tls.version() != "TLSv1.3" or tls.selected_alpn_protocol() != "h2":
                 raise ToastError("Backend did not negotiate TLS 1.3 + h2.")
             print(f"Verified backend: {tls.version()}, {tls.selected_alpn_protocol()}, trusted certificate.")
     except (OSError, ssl.SSLError) as exc:
         raise ToastError(f"Backend TLS verification failed ({type(exc).__name__}).") from exc
     print("Nginx configuration, certificate and renewal timer checks passed.")
-    print("This does not test public port-80 reachability, CA renewal, MLKEM, or the REALITY client. Run renew-test and validate REALITY separately.")
+    print(
+        "This does not test public port-80 reachability, CA renewal, MLKEM, or the REALITY client. Run renew-test and validate REALITY separately."
+    )
 
 
 def renew_test(paths: Paths) -> None:
@@ -839,9 +939,14 @@ def renew_test(paths: Paths) -> None:
     state = load_state(paths)
     if not state:
         raise ToastError("ToastWeb is not installed.")
-    run(["certbot", "renew", "--cert-name", "toastweb-" + state["domain"], "--dry-run", "--non-interactive"], timeout=600)
+    run(
+        ["certbot", "renew", "--cert-name", "toastweb-" + state["domain"], "--dry-run", "--non-interactive"],
+        timeout=600,
+    )
     run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
-    print("CA renewal dry-run passed. Existing production certificates were not replaced; deploy hooks are not exercised by this test.")
+    print(
+        "CA renewal dry-run passed. Existing production certificates were not replaced; deploy hooks are not exercised by this test."
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -849,14 +954,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--version", action="version", version=VERSION)
     commands = result.add_subparsers(dest="command", required=True)
     for name in ("install", "plan"):
-        sub = commands.add_parser(name, help="Install the site" if name == "install" else "Print a no-change deployment plan")
+        sub = commands.add_parser(
+            name, help="Install the site" if name == "install" else "Print a no-change deployment plan"
+        )
         sub.add_argument("--domain")
         sub.add_argument("--email")
         sub.add_argument("--port", type=int, default=8443)
         sub.add_argument("--title", default="Toast Notes")
         sub.add_argument("--description", default="A small place for notes, ideas, and useful things.")
         sub.add_argument("--content-dir", help="A prebuilt static website containing index.html")
-        sub.add_argument("--expected-ip", action="append", default=[], help="Explicit public address for NAT; repeat if needed")
+        sub.add_argument(
+            "--expected-ip", action="append", default=[], help="Explicit public address for NAT; repeat if needed"
+        )
         sub.add_argument("--accept-tos", action="store_true")
         sub.add_argument("--confirm-port-80", action="store_true")
         sub.add_argument("--allow-existing-acme", action="store_true")
@@ -884,11 +993,28 @@ def main(argv: list[str] | None = None) -> int:
             validate_text(args.title)
             validate_text(args.description)
         if args.command == "plan":
-            print(json.dumps({"version": VERSION, "domain": args.domain, "https_backend": f"127.0.0.1:{args.port}",
-                              "http_validation_port": 80, "certificate_method": "HTTP-01 webroot",
-                              "service": SERVICE, "changes": ["APT dependencies", "ToastWeb-owned files/service", "ToastWeb certificate", "ToastWeb renewal timer"],
-                              "never_changes": ["DNS", "Xray/x-ui", "subscriptions", "firewall", "kernel parameters"],
-                              "executed": False}, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "version": VERSION,
+                        "domain": args.domain,
+                        "https_backend": f"127.0.0.1:{args.port}",
+                        "http_validation_port": 80,
+                        "certificate_method": "HTTP-01 webroot",
+                        "service": SERVICE,
+                        "changes": [
+                            "APT dependencies",
+                            "ToastWeb-owned files/service",
+                            "ToastWeb certificate",
+                            "ToastWeb renewal timer",
+                        ],
+                        "never_changes": ["DNS", "Xray/x-ui", "subscriptions", "firewall", "kernel parameters"],
+                        "executed": False,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         elif args.command == "install":
             install(args, paths)
         elif args.command in {"update", "rollback"}:

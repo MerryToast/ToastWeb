@@ -1,4 +1,5 @@
 """No external DNS, CA account, system service, or VPS is changed by unit tests."""
+
 from __future__ import annotations
 
 import argparse
@@ -26,8 +27,20 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(tw.normalize_domain("笔记.example.org").startswith("xn--"))
 
     def test_unsafe_domains(self) -> None:
-        for value in ("https://x.org", "x.org:443", "*.x.org", "127.0.0.1", "localhost", "a_b.org",
-                      "-a.org", "x.org;return 200", "x.org\nserver{}", "a..org", "a/xx.org", "a" * 64 + ".org"):
+        for value in (
+            "https://x.org",
+            "x.org:443",
+            "*.x.org",
+            "127.0.0.1",
+            "localhost",
+            "a_b.org",
+            "-a.org",
+            "x.org;return 200",
+            "x.org\nserver{}",
+            "a..org",
+            "a/xx.org",
+            "a" * 64 + ".org",
+        ):
             with self.subTest(value=value), self.assertRaises(tw.ToastError):
                 tw.normalize_domain(value)
 
@@ -96,7 +109,7 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("xray", unit.lower())
         self.assertNotIn("x-ui", unit.lower())
         hook = tw.render_hook("notes.example.org")
-        self.assertIn('${RENEWED_LINEAGE:-}', hook)
+        self.assertIn("${RENEWED_LINEAGE:-}", hook)
         self.assertIn("/etc/letsencrypt/live/toastweb-notes.example.org", hook)
         self.assertIn("reload toastweb-nginx.service", hook)
         renewal = tw.render_renew_unit("notes.example.org")
@@ -149,7 +162,9 @@ class FileTests(unittest.TestCase):
         self.assertEqual(target.read_text(), "original")
 
     def test_release_html_escape_and_local_assets(self) -> None:
-        release = tw.create_release(self.paths, tw.BUNDLE / "site", '<b>My "site"</b>', "A & B", "notes.example.org", builtin=True)
+        release = tw.create_release(
+            self.paths, tw.BUNDLE / "site", '<b>My "site"</b>', "A & B", "notes.example.org", builtin=True
+        )
         root = self.paths.releases / release
         text = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn("&lt;b&gt;My &quot;site&quot;&lt;/b&gt;", text)
@@ -167,9 +182,16 @@ class FileTests(unittest.TestCase):
     def test_public_paths_with_restrictive_umask(self) -> None:
         previous = os.umask(0o077)
         try:
-            release = tw.create_release(self.paths, tw.BUNDLE / "site", "Title", "Description", "notes.example.org", builtin=True)
-            for directory in (self.paths.current.parent, self.paths.releases, self.paths.acme.parent,
-                              self.paths.acme / ".well-known/acme-challenge", self.paths.releases / release):
+            release = tw.create_release(
+                self.paths, tw.BUNDLE / "site", "Title", "Description", "notes.example.org", builtin=True
+            )
+            for directory in (
+                self.paths.current.parent,
+                self.paths.releases,
+                self.paths.acme.parent,
+                self.paths.acme / ".well-known/acme-challenge",
+                self.paths.releases / release,
+            ):
                 self.assertEqual(directory.stat().st_mode & 0o777, 0o755)
         finally:
             os.umask(previous)
@@ -192,7 +214,9 @@ class FileTests(unittest.TestCase):
 
     def test_missing_index_rejected(self) -> None:
         with self.assertRaises(tw.ToastError):
-            tw.create_release(self.paths, self.paths.at("/absent"), "Title", "Description", "notes.example.org", builtin=False)
+            tw.create_release(
+                self.paths, self.paths.at("/absent"), "Title", "Description", "notes.example.org", builtin=False
+            )
 
     def test_current_pointer_rejects_external_location(self) -> None:
         other = self.paths.at("/unrelated")
@@ -214,10 +238,16 @@ class LinkCollector(HTMLParser):
 
 class PreflightTests(unittest.TestCase):
     def test_wrong_aaaa_and_cloudflare_addresses_rejected(self) -> None:
-        with mock.patch.object(tw, "resolve_domain", return_value={"93.184.216.34", "2606:4700::1111"}), mock.patch.object(tw, "local_addresses", return_value={"93.184.216.34"}):
+        with (
+            mock.patch.object(tw, "resolve_domain", return_value={"93.184.216.34", "2606:4700::1111"}),
+            mock.patch.object(tw, "local_addresses", return_value={"93.184.216.34"}),
+        ):
             with self.assertRaises(tw.ToastError):
                 tw.check_dns("notes.example.org", [])
-        with mock.patch.object(tw, "resolve_domain", return_value={"93.184.216.34"}), mock.patch.object(tw, "local_addresses", return_value={"10.0.0.2"}):
+        with (
+            mock.patch.object(tw, "resolve_domain", return_value={"93.184.216.34"}),
+            mock.patch.object(tw, "local_addresses", return_value={"10.0.0.2"}),
+        ):
             self.assertEqual(tw.check_dns("notes.example.org", ["93.184.216.34"]), {"93.184.216.34"})
 
     def test_port_conflicts_are_not_stopped(self) -> None:
@@ -225,6 +255,7 @@ class PreflightTests(unittest.TestCase):
             if args[0] == "ss":
                 return completed(args, stdout='LISTEN 0 512 0.0.0.0:80 0.0.0.0:* users:(("nginx",pid=999,fd=6))')
             return completed(args, stdout="777\n")
+
         with mock.patch.object(tw, "run", side_effect=fake) as runner:
             with self.assertRaises(tw.ToastError):
                 tw.check_ports(8443)
@@ -235,6 +266,7 @@ class PreflightTests(unittest.TestCase):
             if args[0] == "ss":
                 return completed(args, stdout='LISTEN 0 512 127.0.0.1:8443 0.0.0.0:* users:(("nginx",pid=777,fd=6))')
             return completed(args, stdout="777\n")
+
         with mock.patch.object(tw, "run", side_effect=fake):
             tw.check_ports(8443)
 
@@ -267,7 +299,18 @@ class InstallTransactionTests(unittest.TestCase):
         self.calls: list[list[str]] = []
         self.fail_ca = False
         self.fail_reload = False
-        self.args = tw.parser().parse_args(["install", "--domain", "notes.example.org", "--email", "ops@example.org", "--accept-tos", "--confirm-port-80", "--non-interactive"])
+        self.args = tw.parser().parse_args(
+            [
+                "install",
+                "--domain",
+                "notes.example.org",
+                "--email",
+                "ops@example.org",
+                "--accept-tos",
+                "--confirm-port-80",
+                "--non-interactive",
+            ]
+        )
         for name in ("require_host", "check_ports", "check_other_acme", "ensure_dependencies", "http_probe"):
             patcher = mock.patch.object(tw, name)
             patcher.start()
@@ -310,7 +353,9 @@ class InstallTransactionTests(unittest.TestCase):
         second = tw.load_state(self.paths) or self.fail("Missing second installation state")
         self.assertEqual(second["previous_release"], first["active_release"])
         self.assertNotEqual(second["active_release"], first["active_release"])
-        self.assertFalse(any(any(term in arg for term in ("x-ui", "xray", "ufw", "iptables")) for call in self.calls for arg in call))
+        self.assertFalse(
+            any(any(term in arg for term in ("x-ui", "xray", "ufw", "iptables")) for call in self.calls for arg in call)
+        )
         self.assertTrue(self.paths.renew_timer.exists())
 
     def test_failed_first_install_restores_owned_files(self) -> None:
