@@ -6,6 +6,7 @@ No real CA issuance, DNS mutation, systemd change, or production listener is use
 from __future__ import annotations
 
 import http.client
+import json
 import os
 import shutil
 import socket
@@ -77,6 +78,7 @@ class NginxIntegrationTests(unittest.TestCase):
         release = tw.create_release(
             cls.paths, tw.BUNDLE / "site", "Test Notes", "Integration fixture", "notes.example.org", builtin=True
         )
+        cls.initial_release = release
         tw.activate_release(cls.paths, release)
         tw.write_atomic(cls.paths.acme / ".well-known/acme-challenge/test-token", "HTTP01_OK")
         config = tw.render_nginx(
@@ -171,6 +173,42 @@ class NginxIntegrationTests(unittest.TestCase):
                 response.begin()
                 self.assertEqual(response.status, expected)
                 response.read()
+
+    def request_backend(self, path: str, method: str = "GET") -> tuple[int, dict[str, str], bytes]:
+        context = ssl.create_default_context(cafile=str(self.certificate))
+        context.set_alpn_protocols(["http/1.1"])
+        with (
+            socket.create_connection(("127.0.0.1", self.https_port), timeout=5) as tcp,
+            context.wrap_socket(tcp, server_hostname="notes.example.org") as tls,
+        ):
+            request = f"{method} {path} HTTP/1.1\r\nHost: notes.example.org\r\nConnection: close\r\n\r\n"
+            tls.sendall(request.encode("ascii"))
+            response = http.client.HTTPResponse(tls, method=method)
+            response.begin()
+            return response.status, dict(response.getheaders()), response.read()
+
+    def test_three_theme_sites_and_metadata(self) -> None:
+        try:
+            for theme in ("docs", "status", "api"):
+                with self.subTest(theme=theme):
+                    source, _ = tw.select_content("notes.example.org", theme, None)
+                    release = tw.create_release(self.paths, source, "Test Site", "Test description", "notes.example.org", builtin=True)
+                    tw.activate_release(self.paths, release)
+                    status, _, body = self.request_backend("/")
+                    self.assertEqual(status, 200)
+                    self.assertIn(('data-theme="' + theme + '"').encode(), body)
+                    status, headers, _ = self.request_backend("/assets/theme.css")
+                    self.assertEqual(status, 200)
+                    self.assertIn("text/css", headers.get("Content-Type", ""))
+                    self.assertEqual(self.request_backend("/assets/mark.svg")[0], 200)
+                    if theme == "api":
+                        status, headers, body = self.request_backend("/meta.json")
+                        self.assertEqual(status, 200)
+                        self.assertIn("application/json", headers.get("Content-Type", ""))
+                        self.assertFalse(json.loads(body)["live_monitoring"])
+                        self.assertEqual(self.request_backend("/meta.json", "HEAD")[2], b"")
+        finally:
+            tw.activate_release(self.paths, self.initial_release)
 
     def test_unknown_sni_rejected(self) -> None:
         context = ssl.create_default_context(cafile=str(self.certificate))

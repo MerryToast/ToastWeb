@@ -4,7 +4,7 @@
 
 默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
 
-> **V0.1 是待 VPS 试点验收的初版。** 仓库包含自动测试和 Linux Nginx 集成测试，但这不等于已经完成真实域名的 ACME 签发、续签或生产 REALITY 验收。不要直接在唯一的生产入口上无备份执行。
+> **V0.2 仍需 VPS 试点验收。** 仓库包含自动测试和 Linux Nginx 集成测试，但这不等于已经完成真实域名的 ACME 签发、续签或生产 REALITY 验收。不要直接在唯一的生产入口上无备份执行。
 
 ## 设计边界
 
@@ -34,16 +34,55 @@ ToastWeb 使用独立的 `toastweb-nginx.service` 和 `/etc/toastweb/nginx.conf`
 
 如果本次**首次安装**发行版 Nginx，会控制包安装阶段的自动启动，并禁用刚引入的默认 `nginx.service` 自启；已有服务不会被如此处理。专用续期定时器只更新本项目的证书，不依赖全局 Certbot 定时器。
 
-## V1 支持范围
+## 支持范围
 
 - Debian 13 / Ubuntu 24.04，使用系统软件包和正在运行的 systemd。
 - Python 3.10+；基础网络工具 `ip`、`ss` 应已存在（`iproute2` 包）。
 - 一个域名、一个站点、一个回环 HTTPS 端口。
 - 普通域名，不支持通配符或 IP 证书。
-- 默认内置原创 **Toast** 静态模板；也可部署 Hugo/PaperMod、Hextra 等工具**已经生成的静态目录**。
+- 内置原创 **docs / status / api** 三套静态模板；保留旧版 notes 以兼容现有安装。
+- 也可部署 Hugo/PaperMod、Hextra 等工具**已经生成的静态目录**。
 - 不在 VPS 安装 Hugo、Node.js、Docker 或数据库。
 
 若极简镜像缺少 Python 或 iproute2，请先通过系统包管理器安装。ToastWeb 不会在缺少解释器时下载并执行未知二进制。
+
+## 三套内置模板
+
+| 域名前缀 | 主题 | 风格与内容 |
+|---|---|---|
+| `docs.` | `docs` | 浅色文档站：左侧导航、正文、右侧本页目录 |
+| `status.` | `status` | 深色状态说明页：组件卡片、维护公告，明确标注未接入实时监测 |
+| `api.` | `api` | 三栏接口参考：接口目录、说明、深色请求/JSON 示例；提供真实只读 `/meta.json` |
+
+新安装默认 `--theme auto`：按域名第一个标签匹配上述三种前缀，其他域名回退为 `docs`。可以用 `--theme docs`、`--theme status` 或 `--theme api` 覆盖选择。子域名命名不会带来已证实的抗识别优势。
+
+**这三套是可选模板，不是自动创建三个域名或同时部署三个站点。** 当前依然一次管理一个域名单站点，DNS 由你另行配置。
+
+已有安装重装时，`auto` 会保留原主题；旧版没有主题字段的站点按 `notes` 保留，不会因升级而更换页面。自定义内容也不会被静默替换。
+
+所有主题均为本地 HTML/CSS/SVG，无第三方字体、脚本、追踪或假登录表单。`status` 不编造在线率，`api` 不伪造认证接口；它展示的元数据是静态文件，不是实时健康探测。
+
+### 预览
+
+以下为真实浏览器渲染截图，使用示例域名，不包含生产配置：
+
+**docs**
+
+![docs 桌面预览](.github/previews/docs.png)
+
+[查看 docs 窄屏预览](.github/previews/docs-mobile.png)
+
+**status**
+
+![status 桌面预览](.github/previews/status.png)
+
+[查看 status 窄屏预览](.github/previews/status-mobile.png)
+
+**api**
+
+![api 桌面预览](.github/previews/api.png)
+
+[查看 api 窄屏预览](.github/previews/api-mobile.png)
 
 ## 安装前必须完成
 
@@ -65,7 +104,7 @@ git clone https://github.com/MerryToast/ToastWeb.git
 cd ToastWeb
 
 # 只打印计划，不安装、不联网签证书，也不要求 root。
-python3 toastweb.py plan --domain notes.example.org --email you@example.org
+python3 toastweb.py plan --domain docs.example.org --email you@example.org
 
 # 交互式安装：询问域名、证书联系邮箱、CA 条款及 TCP 80 可达性。
 sudo bash install.sh
@@ -77,10 +116,11 @@ sudo bash install.sh
 
 ```bash
 sudo bash install.sh \
-  --domain notes.example.org \
+  --domain docs.example.org \
+  --theme docs \
   --email you@example.org \
-  --title '我的笔记' \
-  --description '记录学习、项目和日常发现。' \
+  --title '我的文档' \
+  --description '记录项目的使用方式与维护说明。' \
   --accept-tos \
   --confirm-port-80 \
   --non-interactive
@@ -132,7 +172,14 @@ curl --resolve notes.example.org:18443:127.0.0.1 https://notes.example.org:18443
 
 ## 内容更新和回滚
 
-默认模板是原创轻量静态页面，不包含登录表单、广告、第三方字体或统计脚本。初始说明不是虚构的个人文章，请按实际情况替换。
+模板是原创轻量静态页面，不包含登录表单、广告、第三方字体或统计脚本。初始说明不是虚构的个人文章，请按实际情况替换。可显式切换主题，随后回滚会同时恢复内容及主题信息：
+
+```bash
+sudo toastweb update --theme api
+sudo toastweb rollback
+```
+
+切换主题不会修改域名、证书或 DNS；`docs.` 也可以选择 `api` 风格。
 
 ```bash
 # Hugo 等工具在电脑/CI 构建，将 public/ 上传到 VPS 后发布。
@@ -142,9 +189,9 @@ sudo toastweb update --content-dir /path/to/public
 sudo toastweb rollback
 ```
 
-静态目录必须有 `index.html`；拒绝隐藏文件、符号链接、特殊文件及超过安全限额的目录，避免把 `.env` 等内容发布出去。自定义内容发布后，更新必须继续明确提供 `--content-dir`，不会静默换回默认模板。
+静态目录必须有 `index.html`；拒绝隐藏文件、符号链接、特殊文件及超过安全限额的目录，避免把 `.env` 等内容发布出去。`--theme` 与 `--content-dir` 不能同时指定。自定义内容发布后，自动更新/重装必须继续提供 `--content-dir`；只有显式指定 `--theme` 才会切换回内置模板。
 
-在源码目录执行 `python3 toastweb.py update` 可发布源码中的默认模板。项目程序升级需要先审阅 `git pull` 的变更，再按原参数重新执行安装；域名/端口迁移不属于 V1 的自动化范围。
+在源码目录执行 `python3 toastweb.py update` 可发布源码中的当前主题，省略 `--theme` 时保留已有主题。项目程序升级需要先审阅 `git pull` 的变更，再按原参数重新执行安装；域名/端口迁移仍不自动进行。
 
 ## 文件和服务
 
@@ -188,6 +235,14 @@ bash -n install.sh
 # 可选：Linux 测试机已安装 Nginx/OpenSSL 时开启真实进程集成测试。
 TOASTWEB_LIVE_NGINX=1 python3 -m unittest discover -s tests -v
 ```
+
+开发者如需重建预览截图，需要在电脑上准备 Node 22+ 和 Chromium/Chrome/Edge，然后运行：
+
+```bash
+python3 tools/preview_themes.py
+```
+
+该工具使用全新浏览器配置、回环临时站点及 CDP 的精确视口模拟，检查 1440px / 390px 视口没有文档级横向溢出。它不属于 VPS 安装依赖，不使用你的浏览器登录状态。
 
 集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上执行这些测试；Debian 13 的首次真实 VPS 试点仍需单独验收。初版测试记录见 [TESTING.md](TESTING.md)。
 

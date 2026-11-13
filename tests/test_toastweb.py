@@ -357,6 +357,61 @@ class InstallTransactionTests(unittest.TestCase):
             any(any(term in arg for term in ("x-ui", "xray", "ufw", "iptables")) for call in self.calls for arg in call)
         )
         self.assertTrue(self.paths.renew_timer.exists())
+        for theme in ("docs", "status", "api"):
+            self.assertTrue((self.paths.app / "themes" / theme / "index.html").is_file())
+
+    def test_theme_switch_rollback_and_failure_recovery(self) -> None:
+        tw.install(self.args, self.paths)
+        original = tw.load_state(self.paths) or self.fail("Missing initial state")
+        self.assertEqual(original["theme"], "docs")
+        tw.update(argparse.Namespace(content_dir=None, theme="status"), self.paths)
+        status_state = tw.load_state(self.paths) or self.fail("Missing status state")
+        self.assertEqual(status_state["theme"], "status")
+        self.assertIn('data-theme="status"', (self.paths.current / "index.html").read_text(encoding="utf-8"))
+        tw.update(argparse.Namespace(), self.paths, rollback=True)
+        self.assertEqual((tw.load_state(self.paths) or {})["theme"], "docs")
+        tw.update(argparse.Namespace(), self.paths, rollback=True)
+        self.assertEqual((tw.load_state(self.paths) or {})["theme"], "status")
+        self.fail_reload = True
+        with self.assertRaises(tw.ToastError):
+            tw.update(argparse.Namespace(content_dir=None, theme="api"), self.paths)
+        restored = tw.load_state(self.paths) or self.fail("Missing restored state")
+        self.assertEqual(restored["theme"], "status")
+        self.assertEqual(restored["active_release"], status_state["active_release"])
+        tw.update(argparse.Namespace(content_dir=None), self.paths)
+        self.assertEqual((tw.load_state(self.paths) or {})["theme"], "status")
+
+    def test_legacy_theme_survives_upgrade(self) -> None:
+        self.args.theme = "notes"
+        tw.install(self.args, self.paths)
+        legacy = tw.read_json(self.paths.state)
+        legacy.pop("theme", None)
+        legacy.pop("previous_theme", None)
+        legacy["version"] = "0.1.0"
+        tw.write_atomic(self.paths.state, json.dumps(legacy), 0o600)
+        self.args.theme = "auto"
+        tw.install(self.args, self.paths)
+        self.assertEqual((tw.load_state(self.paths) or {})["theme"], "notes")
+        self.assertTrue((self.paths.current / "assets/site.css").is_file())
+        self.assertFalse((self.paths.current / "assets/theme.css").exists())
+
+    def test_custom_content_requires_explicit_theme_switch(self) -> None:
+        tw.install(self.args, self.paths)
+        custom = self.paths.at("/custom-public")
+        tw.write_atomic(custom / "index.html", "Custom content")
+        tw.update(argparse.Namespace(content_dir=str(custom)), self.paths)
+        with self.assertRaises(tw.ToastError):
+            tw.install(self.args, self.paths)
+        with self.assertRaises(tw.ToastError):
+            tw.update(argparse.Namespace(content_dir=None), self.paths)
+        self.assertEqual((self.paths.current / "index.html").read_text(), "Custom content")
+        tw.update(argparse.Namespace(content_dir=None, theme="api"), self.paths)
+        self.assertEqual((tw.load_state(self.paths) or {})["theme"], "api")
+        tw.update(argparse.Namespace(), self.paths, rollback=True)
+        state = tw.load_state(self.paths) or self.fail("Missing custom rollback state")
+        self.assertEqual(state["content_type"], "custom")
+        self.assertIsNone(state["theme"])
+        self.assertEqual((self.paths.current / "index.html").read_text(), "Custom content")
 
     def test_failed_first_install_restores_owned_files(self) -> None:
         self.fail_ca = True

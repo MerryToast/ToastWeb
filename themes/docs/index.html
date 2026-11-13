@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="docs">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{SITE_DESCRIPTION}}"><title>{{SITE_TITLE}} · Documentation</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body id="top">
+  <a class="skip" href="#overview">跳到正文</a>
+  <header class="topbar"><div class="top-inner"><a class="brand" href="/"><img src="/assets/mark.svg" width="30" height="30" alt="">{{SITE_TITLE}}</a><span class="separator"></span><span class="workspace">Documentation</span><a class="top-link" href="#quickstart">快速开始 <span aria-hidden="true">↗</span></a></div></header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="文档导航">
+      <div class="space-label">THE HANDBOOK</div>
+      <nav><a class="selected" href="#overview"><span>◈</span> 概览</a><a href="#quickstart"><span>↗</span> 快速开始</a><a href="#structure"><span>▦</span> 内容结构</a><a href="#publishing"><span>↑</span> 发布与更新</a><a href="#principles"><span>◇</span> 维护原则</a><a href="#questions"><span>?</span> 常见问题</a></nav>
+      <div class="sidebar-note"><span class="tiny-dot"></span> Simple by design<p>少一些依赖，<br>多一些清晰的说明。</p></div>
+    </aside>
+    <main class="article">
+      <div class="breadcrumb">Guide <span>/</span> Getting started</div>
+      <section id="overview"><span class="eyebrow">INTRODUCTION</span><h1>从一份清楚的文档开始。</h1><p class="lead">{{SITE_DESCRIPTION}}</p><p>这里是一份轻量站点手册：记录内容如何组织、怎样发布，以及日常维护需要留意的事情。所有页面与静态资源都保存在本站，不依赖外部字体或登录服务。</p><div class="notice"><span class="notice-icon">i</span><div><strong>关于这份手册</strong><p>当前内容为初始指南。请按你的实际项目补充说明，不必为填满页面而编造服务、接口或个人经历。</p></div></div></section>
+      <section id="quickstart"><div class="section-kicker">01 / GET STARTED</div><h2>从小处开始</h2><p>准备好首页、导航和一份真正有用的说明。一个简单但完整的网站，比很多没有内容的入口更容易维护。</p><div class="steps"><div><span>1</span><h3>整理内容</h3><p>写下你希望长期保留的笔记，使用清楚的标题和可访问的链接。</p></div><div><span>2</span><h3>本地预览</h3><p>检查桌面和手机布局，确认样式与图片不依赖第三方站点。</p></div><div><span>3</span><h3>发布并检查</h3><p>发布前保留旧版本，更新后检查页面、资源和证书状态。</p></div></div></section>
+      <section id="structure"><div class="section-kicker">02 / ORGANIZE</div><h2>让结构保持简单</h2><p>一个静态目录就足够承载首页、指南和本地资源。复杂的构建工具不是浏览页面的前提。</p><div class="code-label"><span>Example directory</span><span>STATIC FILES</span></div><pre><code>public/
+├── index.html
+├── guides/
+│   └── getting-started.html
+└── assets/
+    ├── site.css
+    └── mark.svg</code></pre><p class="caption">示例目录用于说明组织方式，不是本站实际目录的完整披露。</p></section>
+      <section id="publishing"><div class="section-kicker">03 / PUBLISH</div><h2>更新应该可以回退</h2><p>在本地完成构建，只发布生成后的静态文件。不要把凭据、私钥、开发环境或未完成的草稿一起上传。</p><pre><code># 在安装了 ToastWeb 的服务器上发布已构建的目录
+sudo toastweb update --content-dir /path/to/public
+
+# 内容有误时，返回前一个版本
+sudo toastweb rollback</code></pre><div class="link-cards"><a href="#principles"><span class="card-icon">◇</span><strong>维护原则</strong><p>保持依赖和公开信息尽可能少。</p><span class="arrow">→</span></a><a href="#questions"><span class="card-icon">?</span><strong>常见问题</strong><p>了解这份静态手册的功能边界。</p><span class="arrow">→</span></a></div></section>
+      <section id="principles"><div class="section-kicker">04 / MAINTAIN</div><h2>把注意力留给内容</h2><ul class="checklist"><li><strong>本地资源：</strong>不加载广告、远程字体或第三方分析脚本。</li><li><strong>真实信息：</strong>没有接入监控时，不发布虚构的在线率或实时指标。</li><li><strong>有边界的公开：</strong>不要把管理入口、账号凭据和内部拓扑写进公开页面。</li><li><strong>定期检查：</strong>证书、链接和备份都需要持续维护。</li></ul></section>
+      <section id="questions"><div class="section-kicker">05 / FAQ</div><h2>你可能会问</h2><details open><summary>这个页面需要账号或后端吗？</summary><p>不需要。这是一份只读静态手册，没有登录表单，也不保存访客输入。</p></details><details><summary>可以替换成自己的文档吗？</summary><p>可以。保留有效的导航和本地资源路径，发布你自己的静态目录即可。</p></details><details><summary>这份文档是否代表某项服务正在被实时监测？</summary><p>不是。页面只提供说明，不冒充监控系统或第三方产品。</p></details></section>
+      <footer class="article-footer"><span>Page built {{BUILD_DATE}}</span><a href="#top">返回顶部 ↑</a></footer>
+    </main>
+    <aside class="toc" aria-label="本页目录"><span>ON THIS PAGE</span><a href="#overview">概览</a><a href="#quickstart">快速开始</a><a href="#structure">内容结构</a><a href="#publishing">发布与更新</a><a href="#principles">维护原则</a><a href="#questions">常见问题</a><div class="toc-domain">{{DOMAIN}}</div></aside>
+  </div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="status">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{SITE_DESCRIPTION}}"><title>{{SITE_TITLE}}</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body id="top">
+  <a class="skip" href="#overview">跳到正文</a>
+  <header class="wrap topbar"><a class="brand" href="/"><img src="/assets/mark.svg" width="30" height="30" alt="">{{SITE_TITLE}}</a><nav aria-label="导航"><a href="#services">服务说明</a><a href="#updates">维护公告</a><a href="#about">关于状态</a></nav><span class="static-label"><span></span> STATIC PAGE</span></header>
+  <main class="wrap">
+    <section class="hero" id="overview"><span class="eyebrow">SERVICE INFORMATION</span><h1>清楚地说明，<br>比猜测更重要。</h1><p>{{SITE_DESCRIPTION}}</p><div class="hero-meta"><span class="outline-pill"><span class="neutral-dot"></span> 未接入实时监测</span><span>Page built {{BUILD_DATE}}</span></div></section>
+    <section class="overview-card" aria-labelledby="overview-title"><div class="icon-box" aria-hidden="true">↗</div><div><h2 id="overview-title">本站页面可以访问</h2><p>当你能正常加载这个页面时，说明本次页面请求已成功。这不等于其他服务或全部网络路径都正常。</p></div><span class="state-pill">PAGE AVAILABLE</span></section>
+    <section class="section" id="services"><div class="section-heading"><div><span class="eyebrow">COMPONENTS</span><h2>服务与监测范围</h2></div><span class="small-note">明确展示已知与未知</span></div><div class="components">
+      <article><div class="component-top"><span class="component-symbol">▤</span><span class="subtle-pill">STATIC</span></div><h3>站点内容</h3><p>当前展示的是已发布的静态内容，不需要登录、数据库或远程脚本。</p><div class="component-foot"><span class="small-dot green"></span> 由本次页面访问确认</div></article>
+      <article><div class="component-top"><span class="component-symbol">⌁</span><span class="subtle-pill muted">NOT CONNECTED</span></div><h3>实时监控</h3><p>尚未接入探测系统，因此不提供实时延迟、流量和可用率数据。</p><div class="component-foot"><span class="small-dot gray"></span> 监测状态未知</div></article>
+      <article><div class="component-top"><span class="component-symbol">◷</span><span class="subtle-pill muted">MANUAL</span></div><h3>维护信息</h3><p>本页公告由站点所有者发布。没有公告，不代表没有发生过任何故障。</p><div class="component-foot"><span class="small-dot amber"></span> 请以已发布信息为准</div></article>
+    </div></section>
+    <section class="section" id="updates"><div class="section-heading"><div><span class="eyebrow">UPDATES</span><h2>维护公告</h2></div><span class="small-note">不自动生成历史事件</span></div><div class="update-box"><div class="timeline-mark"><span></span></div><div class="update-copy"><span class="update-type">NOTICE BOARD</span><h3>当前没有发布具体维护公告</h3><p>这是公告区域的初始说明。可以替换为真实的计划维护、影响范围及恢复信息，不要把演示条目当作已经发生的事件。</p><div class="notice-hint">建议包含：时间范围 · 受影响功能 · 当前进展</div></div></div></section>
+    <section class="about-card" id="about"><div><span class="eyebrow">ABOUT THIS PAGE</span><h2>这里不是实时监控系统</h2><p>没有接入真实数据源时，页面不会编造「99.99% 在线率」、历史故障曲线或虚假的在线人数。如果需要实时看板，应先配置探测，再明确说明其覆盖范围和更新频率。</p></div><div class="page-details"><div><span>Page type</span><strong>Static service notice</strong></div><div><span>Live monitoring</span><strong>Not configured</strong></div><div><span>Resources</span><strong>Served locally</strong></div></div></section>
+  </main>
+  <footer class="wrap footer"><span>{{DOMAIN}} <span class="footer-divider">/</span> {{SITE_TITLE}}</span><a href="#top">返回顶部 ↑</a></footer>
+</body>
+</html>

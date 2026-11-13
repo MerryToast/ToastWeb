@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="api">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{SITE_DESCRIPTION}}"><title>{{SITE_TITLE}} · API Reference</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body id="top">
+  <a class="skip" href="#introduction">跳到正文</a>
+  <header class="topbar"><div class="brand-area"><a class="brand" href="/"><img src="/assets/mark.svg" width="29" height="29" alt="">{{SITE_TITLE}}</a><span class="product-label">DEVELOPER REFERENCE</span></div><a class="header-action" href="/meta.json">打开元数据 <span aria-hidden="true">↗</span></a></header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="接口目录"><span class="nav-group">GETTING STARTED</span><nav><a class="active" href="#introduction">概览</a><a href="#base-url">访问地址</a><a href="#authentication">认证说明</a></nav><span class="nav-group second">STATIC METADATA</span><nav><a href="#metadata"><span class="method tiny">GET</span> 读取元数据</a><a href="#headers"><span class="method tiny">HEAD</span> 检查响应头</a><a href="#errors">错误与限制</a></nav><div class="sidebar-foot"><span class="side-dot"></span> READ-ONLY INTERFACE<p>本地资源 · 无调试密钥</p></div></aside>
+    <main class="reference">
+      <section class="reference-row" id="introduction"><div class="copy intro-copy"><span class="eyebrow">API REFERENCE</span><h1>小而清楚的接口，<br>从这里开始。</h1><p class="lead">{{SITE_DESCRIPTION}}</p><p>本站仅提供公开的静态元数据，不是文件上传、账户或媒体 API。右侧示例与本站实际的 <code>/meta.json</code> 文件一致，可以直接查看。</p><div class="info-box"><strong>没有隐藏的 API 后端</strong><p>此页面不收集密钥、不保存输入，也不会向第三方验证服务发送请求。</p></div></div><div class="sample intro-sample"><div class="sample-kicker">BASE URL</div><div class="base-url">https://{{DOMAIN}}</div><div class="sample-pills"><span>HTTPS</span><span>JSON</span><span>READ ONLY</span></div><div class="sample-description">一份轻量、可直接访问的静态参考。<br>没有「Try it out」表单，也不需要 Token。</div></div></section>
+      <section class="reference-row" id="base-url"><div class="copy"><span class="eyebrow">CONNECTION</span><h2>访问地址</h2><p>使用当前域名的 HTTPS 地址。相对路径始终指向本站，不依赖公共演示 API 或外部脚本。</p><div class="parameter-row"><code>Content-Type</code><span>application/json</span></div><div class="parameter-row"><code>Methods</code><span>GET, HEAD</span></div></div><div class="sample"><div class="sample-heading"><span>Request</span><span class="language">HTTP</span></div><pre><code><span class="code-verb">GET</span> /meta.json HTTP/1.1
+Host: {{DOMAIN}}
+Accept: application/json</code></pre></div></section>
+      <section class="reference-row" id="authentication"><div class="copy"><span class="eyebrow">AUTHENTICATION</span><h2>公开读取，不需要密钥</h2><p>元数据文件允许匿名读取。本站没有登录接口，因此不会让你提交账号、密码或 API Token，也不会为了展示效果而虚构认证失败。</p><span class="auth-badge"><span></span> No authentication required</span></div><div class="sample"><div class="sample-heading"><span>Authentication</span><span class="language">NONE</span></div><pre><code><span class="code-comment"># 不需要 Authorization 头
+# 不需要 Cookie 或查询参数
+# 不要在 URL 中附带任何凭据</span></code></pre></div></section>
+      <section class="reference-row" id="metadata"><div class="copy"><div class="endpoint"><span class="method">GET</span><code>/meta.json</code></div><h2>读取站点元数据</h2><p>获取静态接口的类型与能力说明。<code>live_monitoring: false</code> 表示没有配置实时监测，不能把这个响应当作其他服务健康检查。</p><h3>响应字段</h3><div class="field"><div><code>schema_version</code><span>string</span></div><p>这份静态文档使用的结构版本。</p></div><div class="field"><div><code>service</code><span>string</span></div><p>资源所属的服务类型。</p></div><div class="field"><div><code>live_monitoring</code><span>boolean</span></div><p>是否接入实时监测；当前为 false。</p></div><a class="resource-link" href="/meta.json">在浏览器中查看真实响应 ↗</a></div><div class="sample"><div class="sample-heading"><span>Request example</span><span class="language">cURL</span></div><pre><code>curl https://{{DOMAIN}}/meta.json</code></pre><div class="sample-heading response-heading"><span><span class="response-dot"></span> Response</span><span class="response-status">200 OK</span></div><pre class="json"><code>{
+  <span class="code-key">"schema_version"</span>: <span class="code-string">"1"</span>,
+  <span class="code-key">"service"</span>: <span class="code-string">"static-site"</span>,
+  <span class="code-key">"authentication"</span>: <span class="code-string">"not-required"</span>,
+  <span class="code-key">"live_monitoring"</span>: <span class="code-value">false</span>
+}</code></pre></div></section>
+      <section class="reference-row" id="headers"><div class="copy"><div class="endpoint"><span class="method">HEAD</span><code>/meta.json</code></div><h2>检查响应头</h2><p>只获取资源的响应头，不下载响应体。文件内容发布更新后，缓存相关头部会随实际服务器行为变化，本站不伪造固定的过期时间。</p></div><div class="sample"><div class="sample-heading"><span>Request example</span><span class="language">cURL</span></div><pre><code>curl --head https://{{DOMAIN}}/meta.json</code></pre><p class="sample-note">实际头部以服务器返回为准。</p></div></section>
+      <section class="reference-row" id="errors"><div class="copy"><span class="eyebrow">LIMITS</span><h2>错误与限制</h2><div class="status-row"><code>200</code><div><strong>文件读取成功</strong><p>有效路径返回对应的静态资源。</p></div></div><div class="status-row"><code>404</code><div><strong>资源不存在</strong><p>不存在的路径使用正常的 HTTP 404。</p></div></div><div class="status-row"><code>403</code><div><strong>写入不被允许</strong><p>默认静态站不接受 POST 等写入方法；错误页不承诺是 JSON。</p></div></div><p class="small-note">此说明针对 ToastWeb 默认站点配置。模板本身不启动应用服务，也不改变证书、DNS 或其他服务配置。</p><footer class="copy-footer">Page built {{BUILD_DATE}} <a href="#top">返回顶部 ↑</a></footer></div><div class="sample"><div class="sample-heading"><span>Nonexistent resource</span><span class="language">cURL</span></div><pre><code>curl --include \
+  https://{{DOMAIN}}/missing-resource</code></pre><div class="response-example"><span>HTTP status</span><strong>404 Not Found</strong><p>错误响应按真实的资源状态生成，<br>不是认证接口的模拟结果。</p></div></div></section>
+    </main>
+  </div>
+</body>
+</html>

@@ -28,7 +28,8 @@ jobs:
           /tmp/toastweb-lint/bin/ruff check .
           bash -n install.sh
           shellcheck install.sh
-          python3 -m compileall -q toastweb.py tests
+          python3 -m compileall -q toastweb.py tests tools
+          node --check tools/capture_preview.mjs
       - name: Unit and isolated Nginx integration tests
         env:
           TOASTWEB_LIVE_NGINX: "1"

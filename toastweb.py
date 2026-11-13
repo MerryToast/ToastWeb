@@ -25,13 +25,19 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 OWNER = "ToastWeb"
 MARKER = "# Managed by ToastWeb; do not remove this ownership marker."
 SERVICE = "toastweb-nginx.service"
 RENEW_TIMER = "toastweb-renew.timer"
 SUPPORTED = {("debian", "13"), ("ubuntu", "24.04")}
 BUNDLE = Path(__file__).resolve().parent
+THEMES = {
+    "docs": ("Toast Docs", "Clear guides for a small, well-kept corner of the web."),
+    "status": ("Service Status", "Service information, maintenance notices, and published updates."),
+    "api": ("Toast API", "A small, read-only interface with clear examples and no hidden dependencies."),
+    "notes": ("Toast Notes", "A small place for notes, ideas, and useful things."),
+}
 
 
 class ToastError(RuntimeError):
@@ -367,7 +373,59 @@ def load_state(paths: Paths) -> dict[str, Any] | None:
         value = state.get(key)
         if value and not re.fullmatch(r"[A-Za-z0-9_-]+", str(value)):
             raise ToastError("Invalid release identifier in site state.")
+    state["theme"] = state_theme(state)
+    if state.get("previous_release"):
+        state["previous_content_type"] = state.get("previous_content_type") or state.get("content_type", "builtin")
+        state["previous_theme"] = state_theme(state, previous=True)
     return state
+
+
+def state_theme(state: dict[str, Any], *, previous: bool = False) -> str | None:
+    prefix = "previous_" if previous else ""
+    if state.get(prefix + "content_type", "builtin") != "builtin":
+        return None
+    theme = state.get(prefix + "theme") or "notes"  # v0.1 installations had the notes template only.
+    if not isinstance(theme, str) or theme not in THEMES:
+        raise ToastError("Unknown template in installation state; no files changed.")
+    return str(theme)
+
+
+def choose_theme(domain: str, requested: str = "auto", state: dict[str, Any] | None = None) -> str:
+    if requested != "auto":
+        if requested not in THEMES:
+            raise ToastError("Unknown theme. Choose docs, status, api, or legacy notes.")
+        return requested
+    if state and state.get("content_type", "builtin") == "builtin":
+        return state_theme(state) or "notes"
+    prefix = normalize_domain(domain).split(".", 1)[0]
+    return prefix if prefix in {"docs", "status", "api"} else "docs"
+
+
+def select_content(
+    domain: str, requested: str, content_dir: str | None, state: dict[str, Any] | None = None,
+) -> tuple[Path, str | None]:
+    if content_dir:
+        if requested != "auto":
+            raise ToastError("--theme and --content-dir are mutually exclusive.")
+        return Path(content_dir).resolve(), None
+    if state and state.get("content_type") == "custom" and requested == "auto":
+        raise ToastError("This site uses custom content. Supply --content-dir or explicitly choose --theme.")
+    theme = choose_theme(domain, requested, state)
+    source = BUNDLE / "site" if theme == "notes" else BUNDLE / "themes" / theme
+    if not (source / "index.html").is_file():
+        raise ToastError("Template bundle is incomplete; run from a complete ToastWeb checkout.")
+    return source, theme
+
+
+def site_metadata(
+    title: str | None, description: str | None, theme: str | None, state: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    defaults = THEMES[theme or "docs"]
+    old = state or {}
+    return (
+        validate_text(title if title is not None else old.get("title", defaults[0])),
+        validate_text(description if description is not None else old.get("description", defaults[1])),
+    )
 
 
 def assert_owned(paths: Paths) -> None:
@@ -438,6 +496,8 @@ def create_release(paths: Paths, source: Path, title: str, description: str, dom
         "{{SITE_DESCRIPTION}}": html.escape(description, quote=True),
         "{{DOMAIN}}": html.escape(domain, quote=True),
         "{{YEAR}}": str(dt.datetime.now(dt.timezone.utc).year),
+        "{{BUILD_DATE}}": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "{{VERSION}}": VERSION,
     }
     for path in destination.rglob("*"):
         path.chmod(0o755 if path.is_dir() else 0o644)
@@ -705,10 +765,11 @@ def install_bundle(paths: Paths) -> None:
         write_atomic(paths.app / ".toastweb-managed", OWNER + "\n")
         for filename in ("toastweb.py", "VERSION"):
             shutil.copy2(BUNDLE / filename, paths.app / filename)
-        destination = paths.app / "site"
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.copytree(BUNDLE / "site", destination)
+        for folder in ("site", "themes"):
+            destination = paths.app / folder
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(BUNDLE / folder, destination)
     except OSError as exc:
         raise ToastError("Cannot install the ToastWeb application bundle.") from exc
 
@@ -778,8 +839,6 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
     domain = normalize_domain(args.domain)
     email = validate_email(args.email)
     port = validate_port(args.port)
-    title = validate_text(args.title)
-    description = validate_text(args.description)
     with operation_lock(paths):
         assert_owned(paths)
         old = load_state(paths)
@@ -787,15 +846,12 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             raise ToastError(
                 "V1 manages one site. Domain/port migration requires an explicit manual plan; existing service was not changed."
             )
+        source, theme = select_content(domain, args.theme, args.content_dir, old)
+        title, description = site_metadata(args.title, args.description, theme, old)
         check_ports(port)
         addresses = check_dns(domain, args.expected_ip)
         check_other_acme(paths, args.allow_existing_acme)
         confirm(args)
-        source = Path(args.content_dir).resolve() if args.content_dir else BUNDLE / "site"
-        if old and old.get("content_type") == "custom" and not args.content_dir:
-            raise ToastError(
-                "This site uses custom content; supply --content-dir to avoid replacing it with the default template."
-            )
         if not (source / "index.html").is_file():
             raise ToastError("Content source must contain index.html.")
         ensure_dependencies(paths)
@@ -844,9 +900,11 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 "title": title,
                 "description": description,
                 "content_type": "custom" if args.content_dir else "builtin",
+                "theme": theme,
                 "active_release": release,
                 "previous_release": old.get("active_release") if old else None,
                 "previous_content_type": old.get("content_type") if old else None,
+                "previous_theme": state_theme(old) if old else None,
                 "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             }
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
@@ -865,19 +923,21 @@ def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) ->
         with Transaction(paths):
             previous = state["active_release"]
             previous_type = state.get("content_type", "builtin")
+            previous_theme = state_theme(state)
             if rollback:
                 release = state.get("previous_release")
                 if not release:
                     raise ToastError("No previous content release is available.")
+                restored_theme = state_theme(state, previous=True)
                 state["content_type"] = state.get("previous_content_type") or previous_type
+                state["theme"] = restored_theme
             else:
-                if state.get("content_type") == "custom" and not args.content_dir:
-                    raise ToastError("Supply --content-dir for a custom website.")
-                source = Path(args.content_dir).resolve() if args.content_dir else BUNDLE / "site"
+                source, theme = select_content(state["domain"], getattr(args, "theme", None) or "auto", args.content_dir, state)
                 release = create_release(
                     paths, source, state["title"], state["description"], state["domain"], builtin=not args.content_dir
                 )
                 state["content_type"] = "custom" if args.content_dir else "builtin"
+                state["theme"] = theme
             activate_release(paths, release)
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "reload", SERVICE])
@@ -885,6 +945,8 @@ def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) ->
                 active_release=release,
                 previous_release=previous,
                 previous_content_type=previous_type,
+                previous_theme=previous_theme,
+                version=VERSION,
                 updated_at=dt.datetime.now(dt.timezone.utc).isoformat(),
             )
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
@@ -897,7 +959,7 @@ def status(paths: Paths) -> None:
         raise ToastError("ToastWeb is not installed.")
     visible = {
         k: state.get(k)
-        for k in ("version", "domain", "port", "content_type", "active_release", "previous_release", "updated_at")
+        for k in ("version", "domain", "port", "content_type", "theme", "previous_theme", "active_release", "previous_release", "updated_at")
     }
     visible["service"] = run(["systemctl", "is-active", SERVICE], check=False).stdout.strip()
     visible["renewal_timer"] = run(["systemctl", "is-active", RENEW_TIMER], check=False).stdout.strip()
@@ -960,8 +1022,9 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--domain")
         sub.add_argument("--email")
         sub.add_argument("--port", type=int, default=8443)
-        sub.add_argument("--title", default="Toast Notes")
-        sub.add_argument("--description", default="A small place for notes, ideas, and useful things.")
+        sub.add_argument("--theme", choices=["auto", *THEMES], default="auto", help="New sites infer docs/status/api from the first subdomain label; existing sites keep their theme")
+        sub.add_argument("--title", help="Site title; defaults to the selected theme or existing configuration")
+        sub.add_argument("--description", help="Site description; defaults to the selected theme or existing configuration")
         sub.add_argument("--content-dir", help="A prebuilt static website containing index.html")
         sub.add_argument(
             "--expected-ip", action="append", default=[], help="Explicit public address for NAT; repeat if needed"
@@ -972,6 +1035,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--non-interactive", action="store_true")
     sub = commands.add_parser("update", help="Publish static content without changing certificate or domain")
     sub.add_argument("--content-dir")
+    sub.add_argument("--theme", choices=list(THEMES), help="Explicitly switch the built-in template")
     for name in ("rollback", "status", "doctor", "renew-test"):
         commands.add_parser(name)
     return result
@@ -990,14 +1054,22 @@ def main(argv: list[str] | None = None) -> int:
             args.domain = normalize_domain(args.domain)
             args.email = validate_email(args.email)
             validate_port(args.port)
-            validate_text(args.title)
-            validate_text(args.description)
+            if args.title is not None:
+                validate_text(args.title)
+            if args.description is not None:
+                validate_text(args.description)
         if args.command == "plan":
+            _, theme = select_content(args.domain, args.theme, args.content_dir)
+            title, description = site_metadata(args.title, args.description, theme)
             print(
                 json.dumps(
                     {
                         "version": VERSION,
                         "domain": args.domain,
+                        "theme": theme,
+                        "title": title,
+                        "description": description,
+                        "theme_policy": "auto preserves the existing theme on reinstall",
                         "https_backend": f"127.0.0.1:{args.port}",
                         "http_validation_port": 80,
                         "certificate_method": "HTTP-01 webroot",

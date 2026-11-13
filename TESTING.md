@@ -1,17 +1,29 @@
-# 初版验证记录
+# 验证记录
+
+## 0.2：docs / status / api 三套模板
+
+- 本地 Ruff、Bash 与 Node 开发工具语法检查通过。
+- 本地 Windows 当前 48 项中 35 项通过，13 项 Linux 专用测试跳过。
+- 使用全新 Edge 无头配置实际渲染三套模板，并检查 1440 × 1100、390 × 844 两种精确视口；六次渲染的文档宽度均未超过视口宽度。
+- 使用 CDP 视口模拟，避免 Windows 无头浏览器最小窗口宽度造成错误的窄屏截图。
+- 桌面/窄屏截图保存在 `.github/previews/`，仅使用示例域名，不含生产状态。
+- 新增前缀匹配、手动覆盖、旧 notes 迁移、主题切换/回滚/失败恢复、自定义内容保护、本地资源/锚点检查和 API 元数据检查。
+- Linux 集成测试新增三套实际站点的 HTML/CSS/SVG 与 `/meta.json` GET/HEAD 验证；结果以[当前提交的 Actions](https://github.com/MerryToast/ToastWeb/actions)为准。
+
+## 0.1：初版历史记录
 
 日期：2026-11-12。
 
-## 已完成
+### 已完成
 
-### 本地 Windows
+#### 本地 Windows
 
 - Ruff 0.14.0：通过。
 - `bash -n install.sh`：通过。
 - Python unittest：当前 32 项中 23 项通过，9 项 Linux 专用测试按设计跳过。
 - `plan`：输出无变更计划，不调用部署命令。
 
-### GitHub Actions / Ubuntu 24.04
+#### GitHub Actions / Ubuntu 24.04
 
 初次完整验证对应提交 `9397252`：
 
