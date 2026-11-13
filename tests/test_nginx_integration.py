@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from importlib import import_module
 from pathlib import Path
 
 import toastweb as tw
@@ -159,9 +160,12 @@ class NginxIntegrationTests(unittest.TestCase):
             connection.close()
 
     def test_worker_identity_and_private_key_permissions(self) -> None:
-        import pwd
-
-        expected = pwd.getpwnam("www-data").pw_uid if os.geteuid() == 0 else os.geteuid()
+        # POSIX-only APIs are optional on Windows unit-test hosts.
+        getuid = getattr(os, "geteuid", None)
+        if getuid is None:
+            self.skipTest("Worker identity requires POSIX UIDs")
+        uid = getuid()
+        expected = import_module("pwd").getpwnam("www-data").pw_uid if uid == 0 else uid
         children = Path(f"/proc/{self.process.pid}/task/{self.process.pid}/children").read_text().split()
         self.assertTrue(children)
         for pid in children:
@@ -186,9 +190,11 @@ class NginxIntegrationTests(unittest.TestCase):
                 self.request_backend("/", host=host)
 
     def test_http2_wrong_authority_with_valid_sni_is_closed(self) -> None:
-        from h2.config import H2Configuration
-        from h2.connection import H2Connection
-        from h2.events import ConnectionTerminated, DataReceived, ResponseReceived, StreamEnded, StreamReset
+        # Test extras are loaded only when opt-in live tests actually run;
+        # Windows unit-only environments need not install or resolve h2.
+        h2_config = import_module("h2.config")
+        h2_connection = import_module("h2.connection")
+        h2_events = import_module("h2.events")
 
         context = ssl.create_default_context(cafile=str(self.certificate))
         context.set_alpn_protocols(["h2"])
@@ -197,7 +203,7 @@ class NginxIntegrationTests(unittest.TestCase):
             context.wrap_socket(tcp, server_hostname="notes.example.org") as tls,
         ):
             self.assertEqual(tls.selected_alpn_protocol(), "h2")
-            client = H2Connection(config=H2Configuration(client_side=True))
+            client = h2_connection.H2Connection(config=h2_config.H2Configuration(client_side=True))
             client.initiate_connection()
             client.send_headers(
                 1,
@@ -212,14 +218,17 @@ class NginxIntegrationTests(unittest.TestCase):
                     return
                 events = client.receive_data(payload)
                 for event in events:
-                    if isinstance(event, ResponseReceived):
+                    if isinstance(event, h2_events.ResponseReceived):
                         # Newer Nginx may explicitly reject before content
                         # handling with 421 rather than resetting the stream.
                         self.assertEqual(dict(event.headers).get(b":status"), b"421")
-                    if isinstance(event, DataReceived):
+                    if isinstance(event, h2_events.DataReceived):
                         body += event.data
                 self.assertNotIn(b"Welcome to nginx!", body)
-                if any(isinstance(event, (StreamReset, StreamEnded, ConnectionTerminated)) for event in events):
+                if any(
+                    isinstance(event, (h2_events.StreamReset, h2_events.StreamEnded, h2_events.ConnectionTerminated))
+                    for event in events
+                ):
                     return
             self.fail("No rejection received for an unknown HTTP/2 authority")
 
