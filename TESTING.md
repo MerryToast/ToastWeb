@@ -4,7 +4,9 @@
 
 - 真机首次启动暴露检查顺序问题：独立的 `nginx -t` 早于 systemd 创建 `/run/toastweb-nginx`，无法打开 PID 路径。
 - 由服务 `ExecStartPre` 在 RuntimeDirectory 创建后执行首次配置校验，启动后、reload 前再执行手动校验；不移除启动前检查，也不放宽私钥权限。
-- 安装事务测试模拟“服务尚未启动时 PID 目录不存在”，并断言首次手动校验在 systemd 启动之后，防止用已有目录掩盖问题。现共 87 项测试；对应提交的 Linux root/非 root 结果见 Actions。
+- 安装事务测试模拟“服务尚未启动时 PID 目录不存在”，并断言首次手动校验在 systemd 启动之后，防止用已有目录掩盖问题。现共 87 项测试；[修复 CI（7ff6878）](https://github.com/MerryToast/ToastWeb/actions/runs/43422617901) 的 Ubuntu 24.04 root/非 root 各 87 项全部通过，无跳过。
+- 受授权的独立 Debian 13 试点已完成真实 APT/systemd、正式 CA 签发、带 deploy hook 的 staging 续期演练及普通续期 service 执行。生产证书未被 dry-run 替换；公网 HTTP-01 文件与通过临时 SSH 隧道的可信 HTTPS 页面均通过外部验证。
+- 该试点 Nginx 1.26.3/OpenSSL 3.5.7 协商 TLS 1.3/h2 和 X25519MLKEM768；错误 HTTP/1.1 Host 被断开，错误 HTTP/2 authority 返回标准 421。集成测试接受明确的 421 或无响应重置，仍拒绝成功响应和默认欢迎页。没有据此宣称 REALITY/客户端已经切换。
 
 ## 0.3：审查修复与测试边界
 
@@ -55,16 +57,19 @@
 
 后续补充了严格 `umask 077` 下公开静态目录权限的回归测试，当前共 32 项。后续提交以仓库 Actions 的对应运行结果为准。
 
-## 尚未完成，不能由 CI 结果替代
+## 不能由 CI 结果替代的真机验收
 
-- Debian 13 上的真实 APT 安装及 systemd 服务全流程。
-- 真实域名的 Let's Encrypt 正式证书签发。
-- CA 续期 dry-run、真实到期续签和部署 hook 的端到端验证。
-- 外部网络对公网 TCP 80 的可达性。
-- 与现有 x-ui/Xray 的正式 Target/SNI 切换及客户端验收。
-- Nginx/OpenSSL 在目标 VPS 上的 MLKEM 实际协商。
-- 人为断电/SIGKILL、APT 中断后的人工恢复演练。
+已完成项仅代表上述受控 Debian 13 独立网站试点，不推广为所有主机均已通过：
 
-**未为测试修改 ProWee 或其他生产 VPS，没有修改 Cloudflare DNS、生产订阅或防火墙。**
+- [x] Debian 13 上的真实 APT 安装及 systemd 独立网站服务流程。
+- [x] 真实域名的 Let's Encrypt 正式证书签发。
+- [x] CA 续期 dry-run 与部署 hook 的端到端验证，未替换正式证书。
+- [x] 外部网络对公网 TCP 80 的可达性。
+- [x] 该后端 Nginx/OpenSSL 的 X25519MLKEM768 实际协商。
+- [ ] 真实到期后的自动续签与长期运行观察。
+- [ ] 现有 x-ui/Xray 的正式 Target/SNI 切换及客户端验收。
+- [ ] 重启持久化、人为断电/SIGKILL、APT 中断后的恢复演练。
+
+**CI 始终使用隔离环境。试点未修改 ProWee、Cloudflare DNS 或生产代理/订阅；仅在独立授权后为试点主机放行 IPv4 TCP 80，防火墙变更不是安装器的自动功能。**
 
 首次 VPS 试点前，应保留原代理配置和独立管理通道，检查端口及旧 ACME 任务，并按 README 分阶段验收。

@@ -188,7 +188,7 @@ class NginxIntegrationTests(unittest.TestCase):
     def test_http2_wrong_authority_with_valid_sni_is_closed(self) -> None:
         from h2.config import H2Configuration
         from h2.connection import H2Connection
-        from h2.events import ConnectionTerminated, ResponseReceived, StreamEnded, StreamReset
+        from h2.events import ConnectionTerminated, DataReceived, ResponseReceived, StreamEnded, StreamReset
 
         context = ssl.create_default_context(cafile=str(self.certificate))
         context.set_alpn_protocols(["h2"])
@@ -205,15 +205,20 @@ class NginxIntegrationTests(unittest.TestCase):
                 end_stream=True,
             )
             tls.sendall(client.data_to_send())
+            body = b""
             for _ in range(20):
                 payload = tls.recv(65536)
                 if not payload:
                     return
                 events = client.receive_data(payload)
-                self.assertFalse(
-                    any(isinstance(event, ResponseReceived) for event in events),
-                    "Unexpected HTTP response for an unknown authority",
-                )
+                for event in events:
+                    if isinstance(event, ResponseReceived):
+                        # Newer Nginx may explicitly reject before content
+                        # handling with 421 rather than resetting the stream.
+                        self.assertEqual(dict(event.headers).get(b":status"), b"421")
+                    if isinstance(event, DataReceived):
+                        body += event.data
+                self.assertNotIn(b"Welcome to nginx!", body)
                 if any(isinstance(event, (StreamReset, StreamEnded, ConnectionTerminated)) for event in events):
                     return
             self.fail("No rejection received for an unknown HTTP/2 authority")

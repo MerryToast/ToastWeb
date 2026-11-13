@@ -4,7 +4,7 @@
 
 默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 默认仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
 
-> **V0.3 仍需 VPS 试点验收。** 仓库包含自动测试和 Linux Nginx 集成测试，但这不等于已经完成真实域名的 ACME 签发、续签或生产 REALITY 验收。不要直接在唯一的生产入口上无备份执行。
+> **V0.3.1 已完成首个 Debian 13 独立网站试点，仍须按环境验收。** 已验证真实域名签发、带部署 hook 的续期 dry-run 及后端 TLS 1.3/h2/MLKEM；这不等于已完成真实到期续签、生产 REALITY 切换或客户端验收。不要直接在唯一的生产入口上无备份执行。
 
 ## 设计边界
 
@@ -278,7 +278,7 @@ python3 tools/preview_themes.py
 
 该工具使用全新浏览器配置、回环临时站点及 CDP 的精确视口模拟，检查 1440px / 390px 视口没有文档级横向溢出。它不属于 VPS 安装依赖，不使用你的浏览器登录状态。
 
-集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上分别以非 root 和 root 运行完整测试，后者核对 Nginx worker 实际降权为 www-data；`h2` 包仅用于开发测试，不是 VPS 依赖。Debian 13 的首次真实 VPS 试点仍需单独验收。初版测试记录见 [TESTING.md](TESTING.md)。
+集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上分别以非 root 和 root 运行完整测试，后者核对 Nginx worker 实际降权为 www-data；`h2` 包仅用于开发测试，不是 VPS 依赖。Debian 13 独立网站试点已另行验收，CI 不包含真实 CA 或生产变更。验证范围与历史记录见 [TESTING.md](TESTING.md)。
 
 ## 安全与许可
 
