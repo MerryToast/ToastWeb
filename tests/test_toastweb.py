@@ -297,6 +297,7 @@ class InstallTransactionTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.paths = tw.Paths(Path(self.temporary.name))
         self.calls: list[list[str]] = []
+        self.nginx_started = False
         self.fail_ca = False
         self.fail_reload = False
         self.args = tw.parser().parse_args(
@@ -331,6 +332,10 @@ class InstallTransactionTests(unittest.TestCase):
 
     def fake_run(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         self.calls.append(args)
+        if args == ["systemctl", "enable", "--now", tw.SERVICE]:
+            self.nginx_started = True
+        if args[:2] == ["/usr/sbin/nginx", "-t"] and not self.nginx_started:
+            raise tw.ToastError("Simulated missing RuntimeDirectory before systemd starts the service")
         if args[0] == "systemctl" and args[1] in {"is-active", "is-enabled"}:
             return completed(args, 3)
         if args[:2] == ["certbot", "certonly"]:
@@ -359,6 +364,14 @@ class InstallTransactionTests(unittest.TestCase):
         self.assertTrue(self.paths.renew_timer.exists())
         for theme in ("docs", "status", "api"):
             self.assertTrue((self.paths.app / "themes" / theme / "index.html").is_file())
+
+    def test_first_install_lets_systemd_create_runtime_directory_before_manual_check(self) -> None:
+        tw.install(self.args, self.paths)
+        started = self.calls.index(["systemctl", "enable", "--now", tw.SERVICE])
+        checked = self.calls.index(["/usr/sbin/nginx", "-t", "-c", str(self.paths.config)])
+        self.assertLess(started, checked)
+        self.assertIn("RuntimeDirectory=toastweb-nginx", self.paths.unit.read_text())
+        self.assertIn("ExecStartPre=/usr/sbin/nginx -t -c /etc/toastweb/nginx.conf", self.paths.unit.read_text())
 
     def test_policy_persistence_and_private_history_permissions(self) -> None:
         self.args.worker_connections = 2048

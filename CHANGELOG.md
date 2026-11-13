@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Let systemd create RuntimeDirectory before the first manual Nginx configuration check; ExecStartPre still validates before starting the daemon.
+- Add a transaction regression for the first-install PID-directory lifecycle, which mocked systemd and redirected integration-test PID paths previously missed.
+
 ## 0.3.0
 
 - Use relative directory redirects, keeping internal HTTPS and SSH-forwarded ports out of Location headers.

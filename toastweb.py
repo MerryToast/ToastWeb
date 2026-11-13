@@ -25,7 +25,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 OWNER = "ToastWeb"
 MARKER = "# Managed by ToastWeb; do not remove this ownership marker."
 SERVICE = "toastweb-nginx.service"
@@ -1163,8 +1163,10 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 0o755,
             )
             run(["systemctl", "daemon-reload"])
-            run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
+            # systemd creates RuntimeDirectory before ExecStartPre validates
+            # a first install. An earlier manual -t cannot open its PID path.
             run(["systemctl", "enable", "--now", SERVICE])
+            run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "reload", SERVICE])
             http_probe(paths, domain, addresses, args.expected_ip)
             print("HTTP preflight passed locally; only the CA can verify Internet-wide port-80 reachability.")

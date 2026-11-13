@@ -1,6 +1,6 @@
 [project]
 name = "toastweb"
-version = "0.3.0"
+version = "0.3.1"
 description = "Isolated static website backend with HTTP-01 certificates"
 requires-python = ">=3.10"
 license = "MIT"

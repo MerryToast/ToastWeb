@@ -1,5 +1,11 @@
 # 验证记录
 
+## 0.3.1：首次安装运行目录
+
+- 真机首次启动暴露检查顺序问题：独立的 `nginx -t` 早于 systemd 创建 `/run/toastweb-nginx`，无法打开 PID 路径。
+- 由服务 `ExecStartPre` 在 RuntimeDirectory 创建后执行首次配置校验，启动后、reload 前再执行手动校验；不移除启动前检查，也不放宽私钥权限。
+- 安装事务测试模拟“服务尚未启动时 PID 目录不存在”，并断言首次手动校验在 systemd 启动之后，防止用已有目录掩盖问题。现共 87 项测试；对应提交的 Linux root/非 root 结果见 Actions。
+
 ## 0.3：审查修复与测试边界
 
 - 回归覆盖相对目录跳转、正确 SNI 配错误 HTTP/1.1 Host / HTTP/2 authority、未知 SNI 拒绝。
