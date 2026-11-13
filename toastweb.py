@@ -402,7 +402,10 @@ def choose_theme(domain: str, requested: str = "auto", state: dict[str, Any] | N
 
 
 def select_content(
-    domain: str, requested: str, content_dir: str | None, state: dict[str, Any] | None = None,
+    domain: str,
+    requested: str,
+    content_dir: str | None,
+    state: dict[str, Any] | None = None,
 ) -> tuple[Path, str | None]:
     if content_dir:
         if requested != "auto":
@@ -418,7 +421,10 @@ def select_content(
 
 
 def site_metadata(
-    title: str | None, description: str | None, theme: str | None, state: dict[str, Any] | None = None,
+    title: str | None,
+    description: str | None,
+    theme: str | None,
+    state: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     defaults = THEMES[theme or "docs"]
     old = state or {}
@@ -932,7 +938,9 @@ def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) ->
                 state["content_type"] = state.get("previous_content_type") or previous_type
                 state["theme"] = restored_theme
             else:
-                source, theme = select_content(state["domain"], getattr(args, "theme", None) or "auto", args.content_dir, state)
+                source, theme = select_content(
+                    state["domain"], getattr(args, "theme", None) or "auto", args.content_dir, state
+                )
                 release = create_release(
                     paths, source, state["title"], state["description"], state["domain"], builtin=not args.content_dir
                 )
@@ -959,7 +967,17 @@ def status(paths: Paths) -> None:
         raise ToastError("ToastWeb is not installed.")
     visible = {
         k: state.get(k)
-        for k in ("version", "domain", "port", "content_type", "theme", "previous_theme", "active_release", "previous_release", "updated_at")
+        for k in (
+            "version",
+            "domain",
+            "port",
+            "content_type",
+            "theme",
+            "previous_theme",
+            "active_release",
+            "previous_release",
+            "updated_at",
+        )
     }
     visible["service"] = run(["systemctl", "is-active", SERVICE], check=False).stdout.strip()
     visible["renewal_timer"] = run(["systemctl", "is-active", RENEW_TIMER], check=False).stdout.strip()
@@ -1022,9 +1040,16 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--domain")
         sub.add_argument("--email")
         sub.add_argument("--port", type=int, default=8443)
-        sub.add_argument("--theme", choices=["auto", *THEMES], default="auto", help="New sites infer docs/status/api from the first subdomain label; existing sites keep their theme")
+        sub.add_argument(
+            "--theme",
+            choices=["auto", *THEMES],
+            default="auto",
+            help="New sites infer docs/status/api from the first subdomain label; existing sites keep their theme",
+        )
         sub.add_argument("--title", help="Site title; defaults to the selected theme or existing configuration")
-        sub.add_argument("--description", help="Site description; defaults to the selected theme or existing configuration")
+        sub.add_argument(
+            "--description", help="Site description; defaults to the selected theme or existing configuration"
+        )
         sub.add_argument("--content-dir", help="A prebuilt static website containing index.html")
         sub.add_argument(
             "--expected-ip", action="append", default=[], help="Explicit public address for NAT; repeat if needed"

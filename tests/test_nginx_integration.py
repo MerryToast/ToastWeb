@@ -192,7 +192,9 @@ class NginxIntegrationTests(unittest.TestCase):
             for theme in ("docs", "status", "api"):
                 with self.subTest(theme=theme):
                     source, _ = tw.select_content("notes.example.org", theme, None)
-                    release = tw.create_release(self.paths, source, "Test Site", "Test description", "notes.example.org", builtin=True)
+                    release = tw.create_release(
+                        self.paths, source, "Test Site", "Test description", "notes.example.org", builtin=True
+                    )
                     tw.activate_release(self.paths, release)
                     status, _, body = self.request_backend("/")
                     self.assertEqual(status, 200)

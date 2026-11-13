@@ -5,6 +5,7 @@ No VPS, DNS, real certificates, browser login profile, or external assets are us
 Requires Node 22+ for the browser CDP helper. Run as a normal desktop user;
 this is not part of the VPS installer.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,9 +66,18 @@ def main() -> int:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                command = [node, str(ROOT / "tools/capture_preview.mjs"), args.browser,
-                           str(root / f"browser-{theme}"), f"http://127.0.0.1:{server.server_port}/", str(output), theme]
-                result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, check=False)
+                command = [
+                    node,
+                    str(ROOT / "tools/capture_preview.mjs"),
+                    args.browser,
+                    str(root / f"browser-{theme}"),
+                    f"http://127.0.0.1:{server.server_port}/",
+                    str(output),
+                    theme,
+                ]
+                result = subprocess.run(
+                    command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, check=False
+                )
                 if result.returncode:
                     raise RuntimeError(f"Headless browser failed for {theme}: {result.stderr[-2000:]}")
                 print(result.stdout.strip())
