@@ -222,9 +222,18 @@ class HistoryTests(unittest.TestCase):
         for value in (0, -1, 51, True, "5"):
             with self.subTest(value=value), self.assertRaises(tw.ToastError):
                 tw.prune_history(self.paths, value, 1)
-        self.backup(1, ["../../outside"])
-        with self.assertRaises(tw.ToastError):
-            tw.prune_history(self.paths, 1, 1, apply=True)
+        directory = self.backup(1, [])
+        for metadata in (
+            {"managed_by": tw.OWNER},
+            {"managed_by": tw.OWNER, "release_refs": None},
+            {"managed_by": tw.OWNER, "release_refs": "not-a-list"},
+            {"managed_by": tw.OWNER, "release_refs": ["../../outside"]},
+        ):
+            with self.subTest(metadata=metadata):
+                tw.write_atomic(directory / "manifest.json", json.dumps(metadata), 0o600)
+                with self.assertRaises(tw.ToastError):
+                    tw.prune_history(self.paths, 1, 1, apply=True)
+                self.assertTrue((self.paths.releases / self.identifier(1)).exists())
 
     def test_cleanup_io_failure_is_actionable_and_does_not_remove_active_content(self) -> None:
         with (

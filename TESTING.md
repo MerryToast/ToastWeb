@@ -9,7 +9,7 @@
 - HTTP/2 的 h2 包仅为开发测试依赖，不引入 VPS Python 第三方依赖。
 - 连接参数的渲染与 FD 预算检查不是并发/性能压力测试。CI 不申请真实证书、不操作生产 systemd、DNS 或 REALITY。
 - 本地 Windows：86 项中 57 项通过、29 项 Linux 专用测试按设计跳过；Ruff、Python/Bash/Node 语法检查通过。Edge 重新渲染 6 张桌面/窄屏截图，1440/390 视口无横向溢出。
-- Linux 具体执行结果以本版本提交的 [Actions](https://github.com/MerryToast/ToastWeb/actions) 为准；本地跳过 Linux 测试不代表通过。
+- [首轮修复 CI（5343abd）](https://github.com/MerryToast/ToastWeb/actions/runs/43395232837)：Ubuntu 24.04 非 root 与 root **各 86 项全部通过，无跳过**；Ruff 0.14.0、ShellCheck 及语法检查通过。后续提交以 [Actions](https://github.com/MerryToast/ToastWeb/actions) 为准；本地跳过 Linux 测试不代表通过。
 
 ## 0.2：docs / status / api 三套模板
 

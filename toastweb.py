@@ -727,7 +727,7 @@ def registered_releases(paths: Paths, releases: list[Path]) -> list[Path]:
 
 def backup_references(directory: Path, marker: dict[str, Any] | None) -> set[str]:
     if marker:
-        refs = marker.get("release_refs", [])
+        refs = marker.get("release_refs")
         if not isinstance(refs, list) or any(
             not isinstance(r, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", r) for r in refs
         ):
