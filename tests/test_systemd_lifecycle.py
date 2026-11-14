@@ -25,6 +25,8 @@ from unittest import mock
 import toastweb as tw
 
 LIVE = os.name == "posix" and os.environ.get("TOASTWEB_LIVE_SYSTEMD") == "1"
+# systemd's own refusal message, with or without the older ", refusing to start" suffix.
+RATE_LIMIT_EVIDENCE = "start request repeated too quickly"
 
 
 def free_port() -> int:
@@ -38,7 +40,7 @@ class SystemdLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         if getattr(os, "geteuid", lambda: 1)() != 0 or not Path("/run/systemd/system").is_dir():
             self.fail("Explicit systemd test mode requires root and a running systemd")
-        for executable in ("nginx", "openssl", "systemctl", "systemd-analyze", "needrestart"):
+        for executable in ("journalctl", "nginx", "openssl", "systemctl", "systemd-analyze", "needrestart"):
             if not shutil.which(executable):
                 self.fail("Missing systemd CI prerequisite: " + executable)
         self.name = "toastweb-ci-" + uuid.uuid4().hex
@@ -134,18 +136,50 @@ class SystemdLifecycleTests(unittest.TestCase):
 
     def properties(self) -> dict[str, str]:
         result = self.command(
-            ["systemctl", "show", self.service, "--property=MainPID,ActiveState,Result,Restart,StartLimitBurst"]
+            [
+                "systemctl",
+                "show",
+                self.service,
+                "--property=MainPID,ActiveState,Result,Restart,StartLimitBurst,StartLimitIntervalUSec,NRestarts",
+            ]
         )
         return dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
 
-    def wait_for(self, predicate: Callable[[dict[str, str]], bool], timeout: int = 20) -> dict[str, str]:
+    def restart_count(self, values: dict[str, str] | None = None) -> int:
+        current = self.properties() if values is None else values
+        try:
+            return int(current["NRestarts"])
+        except (KeyError, ValueError):
+            self.fail(f"Disposable systemd fixture exposed no usable NRestarts property: {current}")
+
+    def fixture_journal(self, lines: int = 60) -> str:
+        """Return a bounded journal tail for this disposable fixture unit only."""
+        try:
+            result = self.command(
+                ["journalctl", "-u", self.service, "-n", str(lines), "--no-pager", "-o", "cat"],
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeError) as error:
+            return f"<journal unavailable: {error.__class__.__name__}>"
+        return (result.stdout or "").strip() or "<no journal entries>"
+
+    def wait_for(
+        self,
+        predicate: Callable[[dict[str, str]], bool],
+        timeout: int = 20,
+        description: str = "expected state",
+    ) -> dict[str, str]:
         deadline = time.monotonic() + timeout
+        values = self.properties()
         while time.monotonic() < deadline:
-            values = self.properties()
             if predicate(values):
                 return values
             time.sleep(0.1)
-        self.fail("Disposable systemd fixture did not reach the expected state")
+            values = self.properties()
+        self.fail(
+            f"Disposable systemd fixture did not reach {description!r} within {timeout}s. "
+            f"Last properties: {values}. Bounded journal for {self.service}:\n{self.fixture_journal()}"
+        )
 
     def test_master_crash_recovers_with_new_pid(self) -> None:
         self.command(["systemctl", "start", self.service])
@@ -163,8 +197,40 @@ class SystemdLifecycleTests(unittest.TestCase):
 
     def test_repeated_invalid_starts_are_rate_limited(self) -> None:
         tw.write_atomic(self.paths.config, tw.MARKER + "\ninvalid_ci_directive;\n")
+        before = self.properties()
+        self.assertEqual(before["Restart"], "on-failure")
+        self.assertEqual(before["StartLimitBurst"], "5")
+        interval = before.get("StartLimitIntervalUSec", "")
+        self.assertTrue(interval and interval not in {"0", "infinity"}, f"Start limit is not enabled: {before}")
+        burst = int(before["StartLimitBurst"])
+        # Result may still report the last ExecStartPre failure (exit-code) instead of
+        # start-limit-hit, so require both a restart count the burst can prove and a
+        # real refusal in the journal. The explicit start consumes one slot of the burst.
+        restarts_required = burst - 1
+        self.assertGreaterEqual(restarts_required, 4)
         self.command(["systemctl", "start", self.service], check=False)
-        self.wait_for(lambda p: p["ActiveState"] == "failed" and p["Result"] == "start-limit-hit")
+        deadline = time.monotonic() + 60
+        while True:
+            values = self.properties()
+            restarts = self.restart_count(values)
+            journal = ""
+            if values["ActiveState"] == "failed" and restarts >= restarts_required:
+                journal = self.fixture_journal()
+                if values["Result"] == "start-limit-hit" or RATE_LIMIT_EVIDENCE in journal.casefold():
+                    break
+            if time.monotonic() >= deadline:
+                self.fail(
+                    "Disposable systemd fixture never proved start limiting: expected ActiveState=failed, "
+                    f"at least {restarts_required} automatic restarts and a rate-limit refusal. "
+                    f"Last properties: {values}. Bounded journal for {self.service}:\n"
+                    f"{journal or self.fixture_journal()}"
+                )
+            time.sleep(0.2)
+        # RestartSec=2s: staying failed for three seconds proves no restart is still pending.
+        time.sleep(3)
+        settled = self.properties()
+        self.assertEqual(settled["ActiveState"], "failed", f"Unit left the failed state: {settled}")
+        self.assertEqual(self.restart_count(settled), restarts, f"Unit restarted after the rate limit: {settled}")
 
     def test_reload_keeps_deleted_executable_but_package_refresh_replaces_it(self) -> None:
         self.command(["systemctl", "start", self.service])
