@@ -4,7 +4,7 @@
 
 默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 默认仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
 
-> **V0.3.2 为开发版本，新增功能仍须经过隔离 Linux CI 与部署验收；既有 Debian 13 试点使用 V0.3.1，仍须按环境验收。** 已验证真实域名签发、带部署 hook 的续期 dry-run 及后端 TLS 1.3/h2/MLKEM；这不等于已完成真实到期续签、生产 REALITY 切换或客户端验收。不要直接在唯一的生产入口上无备份执行。
+> **V0.3.2 开发版本已通过隔离 Ubuntu 24.04 CI，正式部署仍须按环境验收；既有 Debian 13 试点使用 V0.3.1，仍须按环境验收。** 已验证真实域名签发、带部署 hook 的续期 dry-run 及后端 TLS 1.3/h2/MLKEM；这不等于已完成真实到期续签、生产 REALITY 切换或客户端验收。不要直接在唯一的生产入口上无备份执行。
 
 ## 设计边界
 
@@ -349,7 +349,7 @@ TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tes
 sudo env TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tests -v
 ```
 
-`TOASTWEB_LIVE_SYSTEMD=1` 仅供可丢弃的 root Linux CI/测试机：会创建随机名 `toastweb-ci-*.service`，测试数据和可执行副本放在 `/var/lib/toastweb-ci-*-fixture-*`，PID 目录仍在 `/run/toastweb-ci-*`；只用回环高端口验证真实重启、限流及可执行文件替换，并清理自己的文件和 unit。**不要在生产 VPS 开启此测试模式。** 新增 Linux/systemd 用例尚待 CI 执行，不把 Windows 的跳过计为通过。
+`TOASTWEB_LIVE_SYSTEMD=1` 仅供可丢弃的 root Linux CI/测试机：会创建随机名 `toastweb-ci-*.service`，测试数据和可执行副本放在 `/var/lib/toastweb-ci-*-fixture-*`，PID 目录仍在 `/run/toastweb-ci-*`；只用回环高端口验证真实重启、限流及可执行文件替换，并清理自己的文件和 unit。**不要在生产 VPS 开启此测试模式。** Linux/systemd CI 结果见 [TESTING.md](TESTING.md)，不把 Windows 的跳过计为通过，也不把 CI 等同于生产验收。
 
 开发者如需重建预览截图，需要在电脑上准备 Node 22+ 和 Chromium/Chrome/Edge，然后运行：
 

@@ -1,5 +1,16 @@
 # 验证记录
 
+## 0.3.2：GitHub 提交与 Ubuntu 24.04 CI
+
+- 两批功能提交 `6573eac`，后续仅测试/文档修正 `ebf95a6`、`74cfbc7`；没有修改已提交的运行时代码来迎合测试，也没有删用例或新增跳过。
+- [成功 CI：43606603225（74cfbc7）](https://github.com/MerryToast/ToastWeb/actions/runs/43606603225)：Ubuntu 24.04 **root 215 项全部通过，无跳过**；非 root **212 通过、3 项需要 root 的 systemd 用例按设计跳过**。Ruff、ShellCheck、语法及非变更 plan 步骤通过。
+- 新增 Linux 证据包含：真实 Nginx TLS/h2、HTTP HEAD、在服叶证书指纹，root worker 降权，隔离 systemd 主进程 SIGKILL 恢复，启动限流计数/拒绝日志/停止重试稳定性，以及原子替换测试二进制后 reload 不加载新程序而受控重启更新、needrestart 列表检测与可信 HTTPS 验活。
+- APT hook 已用真实 `apt-config` 解析，health service/timer 已用 `systemd-analyze verify` 校验；没有实际触发整机 APT 升级、真实锁争用或部署一套生产探针。
+- [首次 CI 43605298250](https://github.com/MerryToast/ToastWeb/actions/runs/43605298250) 仅 root 限流用例失败：原断言把限流与 `Result=start-limit-hit` 等同。现要求实际重启次数、限流拒绝证据和超过重试间隔的稳定失败状态，而非接受任意失败。
+- [第二次 CI 43606123179](https://github.com/MerryToast/ToastWeb/actions/runs/43606123179) 在 root fixture 的 `systemd-analyze verify` 退出 1，旧帮助函数未保留 stderr，无法证明具体原因。随后将可执行副本从 `/run` 移到随机 `/var/lib/toastweb-ci-*-fixture-*`（PID 目录仍在 `/run`），消除 noexec 执行位置依赖，并增加有界命令诊断；新 CI 全通过。不把 noexec 假设表述为已观测到的根因。
+- 本次只提交和推送代码，不创建 release/tag，不 SSH/部署 Moecloud，不改变生产 DNS、订阅、客户端、凭据或防火墙。真实 DNS、外部通知送达、CA 续期及公网/REALITY 全链路仍需另行验收；LSP 覆盖仍不完备。
+- 以下两个批次保留**提交前本地阶段记录**；其中“未提交/未运行 CI”只描述当时状态，当前以本节及对应提交的 Actions 为准。
+
 ## 0.3.2：第二批 W2 / W4 本地改进（未发布、未部署）
 
 - 保留第一批全部本地修改；继续使用同一未发布的 0.3.2，不生成提交或 release。

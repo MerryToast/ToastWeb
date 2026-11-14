@@ -7,7 +7,7 @@
 - Add a default-off monitor enable/disable/status/check interface, independent oneshot/timer, configurable sampling/thresholds, certificate warnings, deduplicated failure/recovery events and throttled delivery retries.
 - Default notifications to journal; allow only explicitly configured private root-owned executables with trusted ancestors, safe stdin JSON, no shell, bounded execution and discarded output. Do not configure external credentials or channels automatically.
 - Keep monitoring separate from website lifecycle: probes never restart services, monitor configuration/recovery does not reload the website, and private runtime state is not overwritten by content rollback.
-- Add isolated mocked diagnostics/state-machine/CLI regressions and live Nginx diagnostic probe fixtures; real Linux execution and external notification delivery remain separate acceptance work.
+- Add mocked diagnostics/state-machine/CLI regressions and live Nginx diagnostic probes; isolated Ubuntu root/non-root CI passes, while real external notification delivery remains separate acceptance work.
 
 - Generate bounded on-failure Nginx restarts, with start limits in the systemd Unit section and a bounded startup timeout; preserve administrator drop-ins.
 - Add opt-in --package-upgrade-restart / --no-package-upgrade-restart (default off; preserved on reinstall) and a scoped package-refresh command.
@@ -16,7 +16,7 @@
 - Verify a new master, trusted loopback TLS 1.3 / HTTPS HEAD, and a fresh list-mode report after restart; report failures without rolling back packages or touching other services.
 - Track the package hook and oneshot service in ownership checks and transaction recovery; explicit disable removes only those owned integration files.
 - Document REALITY handshake dependencies, short restart windows, start-limit recovery, and reload versus binary/library updates.
-- Add mocked lifecycle regressions and opt-in disposable systemd CI fixtures for crash recovery, start limiting, and atomic binary replacement; Linux execution remains pending until CI is run.
+- Validate crash recovery, start limiting and atomic binary replacement in disposable systemd CI fixtures; avoid assuming a single systemd Result string, bound failure diagnostics, and keep executed fixture binaries outside potentially noexec /run.
 - Code publication does not deploy to a VPS or change production DNS, firewall, REALITY or subscriptions; release tags and deployment remain separate steps.
 
 ## 0.3.1
