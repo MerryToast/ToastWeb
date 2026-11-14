@@ -27,6 +27,15 @@ import toastweb as tw
 LIVE = os.name == "posix" and os.environ.get("TOASTWEB_LIVE_SYSTEMD") == "1"
 # systemd's own refusal message, with or without the older ", refusing to start" suffix.
 RATE_LIMIT_EVIDENCE = "start request repeated too quickly"
+MAX_DIAGNOSTIC_CHARS = 4000
+
+
+def _bounded_diagnostic(value: object, limit: int = MAX_DIAGNOSTIC_CHARS) -> str:
+    """Format fixture command output for a failure message without unbounded dumping."""
+    text = value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n...[truncated {len(text) - limit} characters]"
 
 
 def free_port() -> int:
@@ -49,7 +58,9 @@ class SystemdLifecycleTests(unittest.TestCase):
         if self.unit.exists() or self.unit.is_symlink():
             self.fail("Refusing to replace an existing fixture unit")
         self.created = False
-        temporary = tempfile.TemporaryDirectory(prefix=self.name + "-fixture-", dir="/run")
+        # Some runners mount /run noexec, so never place the executed binary or its files there.
+        # The unit's own RuntimeDirectory and PIDFile intentionally stay in /run/<unique-name>.
+        temporary = tempfile.TemporaryDirectory(prefix=self.name + "-fixture-", dir="/var/lib")
         self.addCleanup(temporary.cleanup)
         self.addCleanup(self.cleanup_unit)
         self.root = Path(temporary.name)
@@ -124,7 +135,23 @@ class SystemdLifecycleTests(unittest.TestCase):
         )
 
     def command(self, args: list[str], *, timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=check)
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+        except subprocess.TimeoutExpired as error:
+            self.fail(
+                f"Fixture command timed out after {timeout}s: {args}. "
+                f"Bounded stdout:\n{_bounded_diagnostic(error.stdout)}\n"
+                f"Bounded stderr:\n{_bounded_diagnostic(error.stderr)}"
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeError) as error:
+            self.fail(f"Fixture command could not run: {args} ({error.__class__.__name__}: {error})")
+        if check and result.returncode != 0:
+            self.fail(
+                f"Fixture command exited {result.returncode}: {args}. "
+                f"Bounded stdout:\n{_bounded_diagnostic(result.stdout)}\n"
+                f"Bounded stderr:\n{_bounded_diagnostic(result.stderr)}"
+            )
+        return result
 
     def cleanup_unit(self) -> None:
         if not self.created:
@@ -161,7 +188,11 @@ class SystemdLifecycleTests(unittest.TestCase):
             )
         except (OSError, subprocess.SubprocessError, UnicodeError) as error:
             return f"<journal unavailable: {error.__class__.__name__}>"
-        return (result.stdout or "").strip() or "<no journal entries>"
+        text = (result.stdout or "").strip()
+        if not text and result.returncode != 0:
+            reason = _bounded_diagnostic(result.stderr).strip() or "no stderr"
+            return f"<journal unavailable (exit {result.returncode}): {reason}>"
+        return text or "<no journal entries>"
 
     def wait_for(
         self,

@@ -349,7 +349,7 @@ TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tes
 sudo env TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tests -v
 ```
 
-`TOASTWEB_LIVE_SYSTEMD=1` 仅供可丢弃的 root Linux CI/测试机：会创建随机名 `toastweb-ci-*.service`，在 `/run` 和回环高端口验证真实重启、限流及可执行文件替换，并清理自己的 unit。**不要在生产 VPS 开启此测试模式。** 新增 Linux/systemd 用例尚待 CI 执行，不把 Windows 的跳过计为通过。
+`TOASTWEB_LIVE_SYSTEMD=1` 仅供可丢弃的 root Linux CI/测试机：会创建随机名 `toastweb-ci-*.service`，测试数据和可执行副本放在 `/var/lib/toastweb-ci-*-fixture-*`，PID 目录仍在 `/run/toastweb-ci-*`；只用回环高端口验证真实重启、限流及可执行文件替换，并清理自己的文件和 unit。**不要在生产 VPS 开启此测试模式。** 新增 Linux/systemd 用例尚待 CI 执行，不把 Windows 的跳过计为通过。
 
 开发者如需重建预览截图，需要在电脑上准备 Node 22+ 和 Chromium/Chrome/Edge，然后运行：
 
