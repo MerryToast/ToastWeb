@@ -4,7 +4,7 @@
 
 默认使用 **Nginx + HTTP-01 + Let's Encrypt/Certbot**：公网 TCP 80 默认仅提供证书验证，网站 HTTPS 只监听 `127.0.0.1:8443`，适合作为 REALITY 的本机 Target。
 
-> **V0.3.1 已完成首个 Debian 13 独立网站试点，仍须按环境验收。** 已验证真实域名签发、带部署 hook 的续期 dry-run 及后端 TLS 1.3/h2/MLKEM；这不等于已完成真实到期续签、生产 REALITY 切换或客户端验收。不要直接在唯一的生产入口上无备份执行。
+> **V0.3.2 为开发版本，新增功能仍须经过隔离 Linux CI 与部署验收；既有 Debian 13 试点使用 V0.3.1，仍须按环境验收。** 已验证真实域名签发、带部署 hook 的续期 dry-run 及后端 TLS 1.3/h2/MLKEM；这不等于已完成真实到期续签、生产 REALITY 切换或客户端验收。不要直接在唯一的生产入口上无备份执行。
 
 ## 设计边界
 
@@ -33,6 +33,14 @@ ToastWeb 会安装必要依赖、部署静态网站、申请证书、配置定�
 ToastWeb 使用独立的 `toastweb-nginx.service` 和 `/etc/toastweb/nginx.conf`，不把自己的站点塞进已有 Nginx 配置。端口 80 或后端端口已被其他服务使用时会停止，而不是替你停掉那个服务。
 
 如果本次**首次安装**发行版 Nginx，会控制包安装阶段的自动启动，并禁用刚引入的默认 `nginx.service` 自启；已有服务不会被如此处理。专用续期定时器只更新本项目的证书，不依赖全局 Certbot 定时器。
+
+### REALITY 依赖与维护窗口
+
+当 REALITY 的 target 指向本项目时，Nginx 已不只是展示页：后端 TLS 故障会影响新建 REALITY 握手和普通 HTTPS 回落。已建立的代理连接不一定立即断开，不能把影响简单等同于“网站返回 404”。本机 HTTPS 正常也不证明公网 443、真实代理认证或客户端配置正常，仍需分别验收。
+
+生成的独立 unit 使用 `Restart=on-failure`、2 秒重试间隔、60 秒内最多 5 次启动，并设置 30 秒启动超时。启动限流位于 `[Unit]`；达到限制后可能停留在 failed，不能代替告警。人工 `systemctl stop` 不会被自动拉起，已有管理员 drop-in 不会被改写。
+
+重启、升级或卸载前，保留独立于该代理的 SSH/控制台、配置备份及入口回滚方案。必要的 Nginx restart 会产生短暂的新建连接窗口；不要为演练在唯一生产入口上直接注入崩溃。停用或移除网站前，应先人工协调仍引用它的 REALITY。修复失败原因后，可由管理员执行 `systemctl reset-failed toastweb-nginx.service`，再启动并验收；工具不会反复强制启动被停用的服务。
 
 ## 支持范围
 
@@ -138,6 +146,33 @@ sudo bash install.sh \
 
 不会自动删除或禁用旧任务。已有自定义 `policy-rc.d` 时也会停止，不替换管理员策略。
 
+### 可选：软件包升级后的运行时更新
+
+**默认关闭。** 新版本安装时可显式增加 `--package-upgrade-restart`，允许相关二进制/库更新后短暂重启本项目的 Nginx：
+
+```bash
+sudo bash install.sh \
+  --domain docs.example.org --email you@example.org \
+  --accept-tos --confirm-port-80 --non-interactive \
+  --package-upgrade-restart
+```
+
+重装请保留原有内容等参数；自定义站点仍须提供 `--content-dir`。未指定开关时保留原策略，旧 state 缺少此字段视为关闭。按原安装参数重装并改用 `--no-package-upgrade-restart` 可关闭：仅移除本项目拥有的 APT hook/oneshot unit，保留共享软件包及管理员配置。没有单独的卸载或证书删除操作。
+
+启用后额外安装系统 `needrestart`，写入带所有权标记的 APT `DPkg::Post-Invoke` hook。hook 只异步调度静态 oneshot 服务，不等待重启，也不因调度失败阻止 APT；调度失败写入 syslog。任务最多约 15 分钟等待 APT/dpkg 记录锁；等待包管理器时**不持有本站操作锁**，取得本站锁后会再次检查，若包管理器开始工作则释放本站锁继续等待；检查和等待过程都不占用包管理器锁。
+
+任务仅在 `needrestart -b -r l -l` 报告本服务需要更新、服务 active 且未 masked、管理员 `policy-rc.d` 允许时执行：配置校验 → `try-restart` → 新 master → 可信 TLS 1.3 / HTTPS HEAD → 再次检测。`-b` 是批处理，`-r l` 是 list-only，`-l` 仅检查库和已删除的可执行文件，不会重启任何服务。batch 名单遵循 `blacklist_rc`，但本工具不沿用 `override_rc` 的交互/默认勾选；重启授权来自用户显式启用本功能以及上述 active/unmasked/`policy-rc.d` 检查。配置无效时不停止原服务；并发停用不会被强制拉起；无关软件包更新不会无条件重启网站。
+
+**reload 不等于二进制或共享库更新。** 续期加载证书仍用 reload；需要加载新程序/库时才走受控 restart。失败会保留非零状态和 journal，不自动降级软件包，不改 Xray、SSH 或整机自动更新策略；定时健康探针及可选通知见下文，默认不启用、不配置外部渠道。现有系统自己的 needrestart 策略可能另行重启服务，本集成不覆盖它；batch 名单会受 `blacklist_rc` 等过滤配置影响，但本独立 opt-in 不使用 `override_rc` 授权，也不是独立完备的补丁审计。
+
+```bash
+sudo toastweb package-refresh  # 重新检查；未启用策略时不重启
+systemctl status toastweb-package-refresh.service
+journalctl -u toastweb-package-refresh.service -n 50 --no-pager
+```
+
+仅适用于 APT 安装的二进制/已加载库；手工替换程序、长时间 APT 操作导致等待超时，或刷新期间发生另一轮升级，需检查日志后重试。首次启用/重装后也会异步检查一次。此功能不修改 DNS、防火墙、证书、订阅或 REALITY 参数。
+
 ## 安装后验收
 
 ```bash
@@ -146,9 +181,18 @@ sudo toastweb doctor
 sudo toastweb renew-test
 ```
 
-- `doctor`：检查配置、服务、文件描述符预算、续期定时器、证书有效性及可信 TLS 1.3 + h2 握手。
+- `doctor`：只读检查配置、有效 systemd 重启/限流策略、FD 预算、续期 timer、实际监听归属与回环范围、磁盘和在服证书期限/叶指纹一致性、可信 TLS 1.3/h2 和独立 HTTPS HEAD 200。
 - `renew-test`：通过 CA 测试环境演练 HTTP-01 续期，不替换现有正式证书；默认不执行部署 hook。
 - 再人工验证未知 SNI、正确 SNI 配错误 Host 均被拒绝，目录跳转不带出后端端口；检查内容、监听范围及 MLKEM 是否满足要求。
+
+`doctor --json` 输出结构化报告；退出码 `0` 表示本地必要检查通过（可含警告），`1` 表示错误，`2` 表示必要检查未能确认。证书临期默认 20 天，可用 `--warn-cert-days 10` 调整，不会把缺工具/权限等未知结果当作通过。监听检查依据 `ss` 与本服务 MainPID，不以回环连接成功代替仅回环证明。
+
+```bash
+sudo toastweb doctor --json
+sudo toastweb doctor --dns-checks --warn-cert-days 20
+```
+
+DNS 检查需显式请求，仅读取固定 HTTPS 解析器 `dns.google`：CAA 按父域继承查找，DNSSEC 以验证解析器 AD 位为证据，不自行完成整条链验证。缺少 CAA/DNSSEC 不是启动错误，查询失败保留 unknown；不会写 DNS。访问日志仅统计有界尾部的来源计数，不输出请求行/URL。全回环在 `xver=0` 时正常，公网 HTTP/ACME 流量也可产生非回环记录，不据此判断 HTTPS 边界。
 
 **此时浏览器访问公网 443 可能仍显示旧目标站点或握手失败，这是尚未切换 REALITY 的预期。** 可以先通过 SSH 隧道检查后端：
 
@@ -183,6 +227,36 @@ sudo toastweb http-redirect disable
 ```
 
 确认参数仅表示你的人工确认，不是程序完成了公网验证。跳转固定到已配置域名，不信任任意 Host；HTTP-01 验证路径仍直接服务文件。该设置会在重装中保留，开启/关闭失败会尝试恢复原配置。
+
+## 可选：本地后端探针与告警
+
+**默认关闭，旧 state 缺少设置也按关闭处理。** 安装新版程序后可单独启用，不需要重装网站或重签证书：
+
+```bash
+sudo toastweb monitor enable --interval 120 --failures 3 --warn-cert-days 20
+sudo toastweb monitor status
+sudo toastweb monitor check --json
+journalctl -u toastweb-health.service -n 30 --no-pager
+sudo toastweb monitor disable
+```
+
+`interval` 为每次探针退出后等待的秒数（60–3600），不是精确日历调度；`failures` 为连续采样阈值（1–10）。timer 初次约 10 秒后运行。探针复用本地诊断，不查询公共 DNS；必要检查失败、结果未知或证书临期持续达到阈值后记录一次事件，相同问题去重，恢复后记录恢复事件。通知失败不标作送达，同一事件至少间隔 300 秒再尝试；中断/超时下不保证外部渠道恰好投递一次。
+
+默认渠道是 **journal/命令输出**，没有自动接入邮件、Telegram 或其他平台。需要外部发送时，由你审阅并配置一个可信通知程序：
+
+```bash
+# 自行准备并审阅这个脚本；它从 stdin 接收事件 JSON，退出 0 表示已处理。
+sudo install -o root -g root -m 700 /path/to/reviewed-notify /etc/toastweb/notify.sh
+sudo toastweb monitor enable --notify-command /etc/toastweb/notify.sh
+# 清除外部渠道，恢复仅 journal：
+sudo toastweb monitor enable --clear-notifier
+```
+
+通知程序必须是绝对路径、私有可执行常规文件（例如 root:root 0700），自身和所有父目录均 root 拥有、不可被组/其他用户写入，且不得为符号链接；不能放在 `/root` 或 `/home`，因为探针启用了 ProtectHome。程序以单独 argv 执行，**不经 shell**；只接收事件种类、公开域名/端口、时间和检查 ID 等安全摘要，时间为 Unix 秒。stdout/stderr 丢弃，10 秒超时，不能把通知成功等同于接收方已阅读。渠道凭据应在公开站点之外以 root 0600 存放，不能放进命令行、网页或报告。
+
+启用/关闭只管理本项目的探针 unit/timer 和设置，不会启动、重启或修复 Nginx/Xray，也不会删通知脚本、证书或未知文件。设置变更有所有权检查与失败恢复；重装保留策略。运行记录保存在私有 `health-state.json`，不被内容回滚覆盖。`monitor status` 展示配置、timer/probe 状态与上次采样；oneshot 在两次采样之间为 inactive 属正常。
+
+**这是同机后端监控，不是公网或代理端到端监控。** 它不能在整台 VPS 宕机时通知，也不能证明公网 TCP 80/443、CA 真实续签、MLKEM 或 REALITY 认证健康；仍需独立外部监控和人工验收。`renew-test` 的默认部署 hook 行为未改变，不能用普通 dry-run 替代部署链路演练。
 
 ## 内容更新和回滚
 
@@ -240,6 +314,11 @@ sudo toastweb prune --keep-releases 5 --keep-backups 5 --apply
 | `/etc/letsencrypt/live/toastweb-<domain>` | Certbot 管理的证书 |
 | `toastweb-nginx.service` | 网站服务，不是发行版 nginx.service |
 | `toastweb-renew.timer` / `.service` | 每日两次检查本项目证书续期 |
+| `/etc/apt/apt.conf.d/99-toastweb-package-refresh` | 可选、默认关闭的升级后调度 hook |
+| `toastweb-package-refresh.service` | 可选的独立 oneshot；不自行启动被停用的网站 |
+| `toastweb-health.service` / `.timer` | 可选本地诊断探针，默认关闭，不自愈网站 |
+| `/var/lib/toastweb/health-state.json` | 私有告警计数/去重状态，0600，不放进公开内容 |
+| `/run/toastweb-health/monitor.lock` | 私有运行目录中的独立探针锁 |
 
 续期成功后，限定证书 lineage 的部署 hook 先检查配置，再平滑加载 **ToastWeb 的 Nginx**，不会重启 Xray。
 
@@ -257,7 +336,7 @@ sudo toastweb prune --keep-releases 5 --keep-backups 5 --apply
 
 ## 开发与测试
 
-仅使用 Python 标准库运行项目：
+Python 程序仅使用标准库；可选的软件包运行时检测依赖发行版 `needrestart`：
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -270,6 +349,8 @@ TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tes
 sudo env TOASTWEB_LIVE_NGINX=1 /tmp/toastweb-tests/bin/python -m unittest discover -s tests -v
 ```
 
+`TOASTWEB_LIVE_SYSTEMD=1` 仅供可丢弃的 root Linux CI/测试机：会创建随机名 `toastweb-ci-*.service`，在 `/run` 和回环高端口验证真实重启、限流及可执行文件替换，并清理自己的 unit。**不要在生产 VPS 开启此测试模式。** 新增 Linux/systemd 用例尚待 CI 执行，不把 Windows 的跳过计为通过。
+
 开发者如需重建预览截图，需要在电脑上准备 Node 22+ 和 Chromium/Chrome/Edge，然后运行：
 
 ```bash
@@ -278,7 +359,7 @@ python3 tools/preview_themes.py
 
 该工具使用全新浏览器配置、回环临时站点及 CDP 的精确视口模拟，检查 1440px / 390px 视口没有文档级横向溢出。它不属于 VPS 安装依赖，不使用你的浏览器登录状态。
 
-集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd。GitHub Actions 在 Ubuntu 24.04 上分别以非 root 和 root 运行完整测试，后者核对 Nginx worker 实际降权为 www-data；`h2` 包仅用于开发测试，不是 VPS 依赖。Debian 13 独立网站试点已另行验收，CI 不包含真实 CA 或生产变更。验证范围与历史记录见 [TESTING.md](TESTING.md)。
+普通 Nginx 集成测试仅使用临时目录、高位回环端口和测试自签证书，不申请真实证书、不更改 DNS 或 systemd；显式启用的独立 systemd 测试有前述一次性环境限制。GitHub Actions 在 Ubuntu 24.04 上分别以非 root 和 root 运行完整测试，后者核对 Nginx worker 实际降权为 www-data；`h2` 包仅用于开发测试，不是 VPS 依赖。Debian 13 独立网站试点已另行验收，CI 不包含真实 CA 或生产变更。验证范围与历史记录见 [TESTING.md](TESTING.md)。
 
 ## 安全与许可
 

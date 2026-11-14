@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import errno
 import html
 import http.client
 import ipaddress
@@ -15,9 +16,11 @@ import re
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -25,11 +28,14 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 OWNER = "ToastWeb"
 MARKER = "# Managed by ToastWeb; do not remove this ownership marker."
 SERVICE = "toastweb-nginx.service"
 RENEW_TIMER = "toastweb-renew.timer"
+PACKAGE_SERVICE = "toastweb-package-refresh.service"
+HEALTH_SERVICE = "toastweb-health.service"
+HEALTH_TIMER = "toastweb-health.timer"
 SUPPORTED = {("debian", "13"), ("ubuntu", "24.04")}
 BUNDLE = Path(__file__).resolve().parent
 RELEASE_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{8}")
@@ -43,6 +49,10 @@ THEMES = {
 
 class ToastError(RuntimeError):
     """An actionable error that does not contain credentials."""
+
+
+class OperationBusy(ToastError):
+    """Another ToastWeb operation currently holds the project lock."""
 
 
 @dataclass(frozen=True)
@@ -114,6 +124,26 @@ class Paths:
     def logrotate(self) -> Path:
         return self.at("/etc/logrotate.d/toastweb")
 
+    @property
+    def package_unit(self) -> Path:
+        return self.at("/etc/systemd/system/" + PACKAGE_SERVICE)
+
+    @property
+    def package_hook(self) -> Path:
+        return self.at("/etc/apt/apt.conf.d/99-toastweb-package-refresh")
+
+    @property
+    def health_unit(self) -> Path:
+        return self.at("/etc/systemd/system/" + HEALTH_SERVICE)
+
+    @property
+    def health_timer(self) -> Path:
+        return self.at("/etc/systemd/system/" + HEALTH_TIMER)
+
+    @property
+    def health_state(self) -> Path:
+        return self.at("/var/lib/toastweb/health-state.json")
+
     def lineage(self, domain: str) -> Path:
         return self.at("/etc/letsencrypt/live/toastweb-" + domain)
 
@@ -127,6 +157,10 @@ class Paths:
             self.executable,
             self.hook,
             self.logrotate,
+            self.package_unit,
+            self.package_hook,
+            self.health_unit,
+            self.health_timer,
         ]
 
 
@@ -319,9 +353,14 @@ def render_unit(worker_connections: int = 512) -> str:
 [Unit]
 Description=ToastWeb isolated Nginx website
 After=network.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 
 [Service]
 Type=forking
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=30s
 PIDFile=/run/toastweb-nginx/nginx.pid
 RuntimeDirectory=toastweb-nginx
 LimitNOFILE={file_limit(worker_connections)}
@@ -383,6 +422,42 @@ set -eu
 """
 
 
+def render_package_unit() -> str:
+    return f"""{MARKER}
+[Unit]
+Description=Apply pending runtime package updates to ToastWeb only
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/toastweb package-refresh
+TimeoutStartSec=25min
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+"""
+
+
+def render_package_hook() -> str:
+    # Asynchronous: never wait for a service while APT holds dpkg/frontend locks.
+    # A scheduling failure is visible in syslog but must not fail package installation.
+    return f"""// {MARKER}
+DPkg::Post-Invoke {{
+    "if [ -x /usr/local/bin/toastweb ]; then /bin/systemctl --no-block start {PACKAGE_SERVICE} >/dev/null 2>&1 || /usr/bin/logger -t toastweb 'Could not schedule package refresh'; fi; true";
+}};
+"""
+
+
+def configure_package_refresh(paths: Paths, enabled: bool) -> None:
+    # Call only inside an ownership-checked installation transaction.
+    if enabled:
+        write_atomic(paths.package_unit, render_package_unit())
+        write_atomic(paths.package_hook, render_package_hook())
+    else:
+        paths.package_hook.unlink(missing_ok=True)
+        paths.package_unit.unlink(missing_ok=True)
+
+
 def render_logrotate() -> str:
     return f"""{MARKER}
 /var/log/toastweb/*.log {{
@@ -418,6 +493,10 @@ def load_state(paths: Paths) -> dict[str, Any] | None:
     if not isinstance(state.get("http_redirect", False), bool):
         raise ToastError("Invalid HTTP redirect policy in installation state.")
     state.setdefault("http_redirect", False)
+    if not isinstance(state.get("package_upgrade_restart", False), bool):
+        raise ToastError("Invalid package-upgrade restart policy in installation state.")
+    state.setdefault("package_upgrade_restart", False)
+    state["monitor"] = import_module("toastweb_monitor").normalize_monitor(state.get("monitor", {}))
     for key in ("active_release", "previous_release"):
         value = state.get(key)
         if value and not re.fullmatch(r"[A-Za-z0-9_-]+", str(value)):
@@ -592,18 +671,22 @@ def activate_release(paths: Paths, release: str) -> None:
 class Transaction:
     """Recover project-owned config/content pointers, not APT or CA side effects."""
 
-    def __init__(self, paths: Paths) -> None:
+    def __init__(self, paths: Paths, *, manage_website: bool = True) -> None:
         self.paths = paths
+        self.manage_website = manage_website
         self.backup = paths.backups / (
             dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         )
         self.files: list[tuple[Path, Path | None]] = []
-        self.old_link = os.readlink(paths.current) if paths.current.is_symlink() else None
-        self.had_app = paths.app.exists()
+        self.old_link = os.readlink(paths.current) if manage_website and paths.current.is_symlink() else None
+        self.had_app = manage_website and paths.app.exists()
         self.was_active = False
         self.was_enabled = False
         self.timer_was_active = False
         self.timer_was_enabled = False
+        self.health_timer_was_active = False
+        self.health_timer_was_enabled = False
+        self.health_was_active = False
 
     def __enter__(self) -> Transaction:
         if self.paths.backups.is_symlink():
@@ -612,11 +695,30 @@ class Transaction:
         self.paths.backups.chmod(0o700)
         self.backup.mkdir(mode=0o700)
         self.backup.chmod(0o700)
-        self.was_active = run(["systemctl", "is-active", "--quiet", SERVICE], check=False).returncode == 0
-        self.was_enabled = run(["systemctl", "is-enabled", "--quiet", SERVICE], check=False).returncode == 0
-        self.timer_was_active = run(["systemctl", "is-active", "--quiet", RENEW_TIMER], check=False).returncode == 0
-        self.timer_was_enabled = run(["systemctl", "is-enabled", "--quiet", RENEW_TIMER], check=False).returncode == 0
-        for number, path in enumerate(self.paths.managed_files()):
+        if self.manage_website:
+            self.was_active = run(["systemctl", "is-active", "--quiet", SERVICE], check=False).returncode == 0
+            self.was_enabled = run(["systemctl", "is-enabled", "--quiet", SERVICE], check=False).returncode == 0
+            self.timer_was_active = run(["systemctl", "is-active", "--quiet", RENEW_TIMER], check=False).returncode == 0
+            self.timer_was_enabled = (
+                run(["systemctl", "is-enabled", "--quiet", RENEW_TIMER], check=False).returncode == 0
+            )
+        self.health_timer_was_active = (
+            run(["systemctl", "is-active", "--quiet", HEALTH_TIMER], check=False).returncode == 0
+        )
+        self.health_timer_was_enabled = (
+            run(["systemctl", "is-enabled", "--quiet", HEALTH_TIMER], check=False).returncode == 0
+        )
+        self.health_was_active = run(["systemctl", "is-active", "--quiet", HEALTH_SERVICE], check=False).returncode == 0
+        managed = (
+            self.paths.managed_files()
+            if self.manage_website
+            else [
+                self.paths.state,
+                self.paths.health_unit,
+                self.paths.health_timer,
+            ]
+        )
+        for number, path in enumerate(managed):
             saved = self.backup / str(number) if path.exists() else None
             if saved:
                 shutil.copy2(path, saved)
@@ -637,38 +739,51 @@ class Transaction:
             return False
         print(f"Operation failed; restoring ToastWeb-owned files from {self.backup}", file=sys.stderr)
         try:
-            if not self.timer_was_active:
-                run(["systemctl", "stop", RENEW_TIMER], check=False)
-            if not self.timer_was_enabled:
-                run(["systemctl", "disable", RENEW_TIMER], check=False)
-            if not self.was_active:
-                run(["systemctl", "stop", SERVICE], check=False)
-            if not self.was_enabled:
-                run(["systemctl", "disable", SERVICE], check=False)
+            if not self.health_timer_was_active:
+                run(["systemctl", "stop", HEALTH_TIMER], check=False)
+            if not self.health_timer_was_enabled:
+                run(["systemctl", "disable", HEALTH_TIMER], check=False)
+            if not self.health_was_active:
+                run(["systemctl", "stop", HEALTH_SERVICE], check=False)
+            if self.manage_website:
+                if not self.timer_was_active:
+                    run(["systemctl", "stop", RENEW_TIMER], check=False)
+                if not self.timer_was_enabled:
+                    run(["systemctl", "disable", RENEW_TIMER], check=False)
+                if not self.was_active:
+                    run(["systemctl", "stop", SERVICE], check=False)
+                if not self.was_enabled:
+                    run(["systemctl", "disable", SERVICE], check=False)
             for path, saved in self.files:
                 if saved:
                     shutil.copy2(saved, path)
                 elif path.exists():
                     path.unlink()
-            if self.paths.current.is_symlink():
-                self.paths.current.unlink()
-            if self.old_link is not None:
-                self.paths.current.symlink_to(self.old_link, target_is_directory=True)
-            if self.paths.app.exists():
-                shutil.rmtree(self.paths.app)
-            if self.had_app:
-                shutil.copytree(self.backup / "app", self.paths.app)
+            if self.manage_website:
+                if self.paths.current.is_symlink():
+                    self.paths.current.unlink()
+                if self.old_link is not None:
+                    self.paths.current.symlink_to(self.old_link, target_is_directory=True)
+                if self.paths.app.exists():
+                    shutil.rmtree(self.paths.app)
+                if self.had_app:
+                    shutil.copytree(self.backup / "app", self.paths.app)
             run(["systemctl", "daemon-reload"], check=False)
-            if self.was_active:
+            if self.manage_website and self.was_active:
                 run(["/usr/sbin/nginx", "-t", "-c", str(self.paths.config)])
                 active = run(["systemctl", "is-active", "--quiet", SERVICE], check=False).returncode == 0
                 run(["systemctl", "reload" if active else "start", SERVICE])
-            if self.was_enabled:
-                run(["systemctl", "enable", SERVICE], check=False)
-            if self.timer_was_enabled:
-                run(["systemctl", "enable", RENEW_TIMER], check=False)
-            if self.timer_was_active:
-                run(["systemctl", "start", RENEW_TIMER], check=False)
+            if self.manage_website:
+                if self.was_enabled:
+                    run(["systemctl", "enable", SERVICE], check=False)
+                if self.timer_was_enabled:
+                    run(["systemctl", "enable", RENEW_TIMER], check=False)
+                if self.timer_was_active:
+                    run(["systemctl", "start", RENEW_TIMER], check=False)
+            if self.health_timer_was_enabled:
+                run(["systemctl", "enable", HEALTH_TIMER], check=False)
+            if self.health_timer_was_active:
+                run(["systemctl", "start", HEALTH_TIMER], check=False)
         except (OSError, ToastError) as rollback_error:
             print(f"Automatic recovery needs attention: {rollback_error}. Backup retained.", file=sys.stderr)
         return False
@@ -856,8 +971,32 @@ def operation_lock(paths: Paths) -> Iterator[None]:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise ToastError("Another ToastWeb operation is already running.") from exc
+            raise OperationBusy("Another ToastWeb operation is already running.") from exc
         yield
+
+
+@contextlib.contextmanager
+def package_refresh_lock(paths: Paths) -> Iterator[None]:
+    """Wait for both locks without holding the project lock while APT/dpkg runs."""
+    deadline = time.monotonic() + 900
+    while True:
+        if package_manager_busy(paths):
+            if time.monotonic() >= deadline:
+                raise ToastError("Package manager stayed busy; no restart requested. Retry package-refresh later.")
+            time.sleep(2)
+            continue
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(operation_lock(paths))
+            except OperationBusy:
+                pass
+            else:
+                if not package_manager_busy(paths):
+                    yield
+                    return
+        if time.monotonic() >= deadline:
+            raise ToastError("Timed out waiting for a safe package-refresh window; no restart requested.")
+        time.sleep(2)
 
 
 def require_host(paths: Paths) -> None:
@@ -945,8 +1084,10 @@ def check_other_acme(paths: Paths, allowed: bool) -> None:
         )
 
 
-def ensure_dependencies(paths: Paths) -> None:
+def ensure_dependencies(paths: Paths, *, package_upgrade_restart: bool = False) -> None:
     packages = ["nginx", "certbot", "openssl", "ca-certificates", "iproute2", "logrotate"]
+    if package_upgrade_restart:
+        packages.append("needrestart")
     missing = []
     for package in packages:
         status = run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}", package], check=False)
@@ -984,6 +1125,130 @@ def ensure_dependencies(paths: Paths) -> None:
             run(["systemctl", "disable", "--now", "certbot.timer"])
 
 
+def package_manager_busy(paths: Paths) -> bool:
+    """Observe POSIX record locks (APT does not use BSD flock); never retain them."""
+    fcntl: Any = import_module("fcntl")
+    for name in (
+        "/var/lib/dpkg/lock-frontend",
+        "/var/lib/dpkg/lock",
+        "/var/lib/apt/lists/lock",
+        "/var/cache/apt/archives/lock",
+    ):
+        try:
+            stream = paths.at(name).open("r+b")
+        except FileNotFoundError:
+            continue
+        with stream:
+            try:
+                fcntl.lockf(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if exc.errno in (errno.EACCES, errno.EAGAIN):
+                    return True
+                raise
+            fcntl.lockf(stream, fcntl.LOCK_UN)
+    return False
+
+
+def package_service_state() -> tuple[str, int, str]:
+    result = run(["systemctl", "show", SERVICE, "--property=ActiveState,MainPID,UnitFileState"], timeout=10)
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    try:
+        return values["ActiveState"], int(values["MainPID"]), values["UnitFileState"]
+    except (KeyError, ValueError) as exc:
+        raise ToastError("Cannot determine ToastWeb service state; no restart requested.") from exc
+
+
+def package_restart_needed() -> bool:
+    # List mode cannot restart any service, regardless of the host's automatic mode.
+    result = run(
+        ["/usr/sbin/needrestart", "-b", "-r", "l", "-l"],
+        check=False,
+        timeout=120,
+        env=dict(os.environ, LC_ALL="C", NEEDRESTART_MODE="l"),
+    )
+    lines = result.stdout.splitlines()
+    if result.returncode or not any(line.startswith("NEEDRESTART-VER:") for line in lines):
+        raise ToastError("needrestart list-mode detection failed; runtime update status is unknown.")
+    return any(line.strip() == "NEEDRESTART-SVC: " + SERVICE for line in lines)
+
+
+def verify_package_backend(state: dict[str, Any]) -> None:
+    """A real, trusted loopback HTTPS HEAD, not just service-active or TCP-connect."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_3
+    context.set_alpn_protocols(["http/1.1"])
+    try:
+        with (
+            socket.create_connection(("127.0.0.1", state["port"]), timeout=5) as tcp,
+            context.wrap_socket(tcp, server_hostname=state["domain"]) as tls,
+        ):
+            tls.sendall(f"HEAD / HTTP/1.1\r\nHost: {state['domain']}\r\nConnection: close\r\n\r\n".encode("ascii"))
+            with http.client.HTTPResponse(tls, method="HEAD") as response:
+                response.begin()
+                if response.status != 200:
+                    raise ToastError(f"Post-update backend HTTPS returned HTTP {response.status}.")
+    except (OSError, http.client.HTTPException) as exc:
+        raise ToastError(f"Post-update backend HTTPS verification failed ({type(exc).__name__}).") from exc
+
+
+def restart_package_service(paths: Paths, state: dict[str, Any], before: tuple[str, int, str]) -> None:
+    if package_manager_busy(paths):
+        raise ToastError(
+            "Package manager became busy before restart; no restart requested. Retry package-refresh later."
+        )
+    run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)], timeout=15)
+    if package_service_state() != before:
+        print("ToastWeb service state changed during detection; no restart requested. Retry if needed.")
+        return
+    # try-restart does not start a service stopped concurrently by its administrator.
+    run(["systemctl", "try-restart", SERVICE], timeout=60)
+    after = package_service_state()
+    if after[0] != "active" or after[1] <= 1 or after[1] == before[1]:
+        raise ToastError("ToastWeb did not become active with a new master; inspect its journal. No forced start.")
+    for attempt in range(3):
+        try:
+            verify_package_backend(state)
+            break
+        except ToastError:
+            if attempt == 2:
+                raise
+            time.sleep(1)
+    if package_manager_busy(paths):
+        raise ToastError("Another package operation started during refresh; retry after it finishes.")
+    if package_restart_needed():
+        raise ToastError("needrestart still reports a pending ToastWeb update after restart; inspect its journal.")
+    print("ToastWeb restarted with a new master; trusted HTTPS HEAD passed and no pending runtime update reported.")
+
+
+def package_refresh(paths: Paths) -> None:
+    """Only refresh an already active, stale ToastWeb; never roll back distro packages."""
+    require_host(paths)
+    initial = load_state(paths)
+    if not initial or not initial["package_upgrade_restart"]:
+        print("Package-upgrade restarts are disabled; no service changed.")
+        return
+    with package_refresh_lock(paths):
+        state = load_state(paths)
+        if not state or not state["package_upgrade_restart"]:
+            print("Package-upgrade restarts are disabled; no service changed.")
+            return
+        assert_owned(paths)
+        before = package_service_state()
+        if before[0] != "active" or before[1] <= 1 or before[2].startswith("masked"):
+            print("ToastWeb is not active or is masked; it was not started or restarted.")
+            return
+        if not package_restart_needed():
+            print("needrestart did not report a pending ToastWeb runtime update; no service changed.")
+            return
+        policy = paths.at("/usr/sbin/policy-rc.d")
+        if policy.exists():
+            allowed = run([str(policy), "toastweb-nginx", "restart"], check=False, timeout=10)
+            if allowed.returncode:
+                print("policy-rc.d did not allow a ToastWeb restart; no service changed.")
+                return
+        restart_package_service(paths, state, before)
+
+
 def modern_nginx() -> bool:
     result = run(["/usr/sbin/nginx", "-v"])
     match = re.search(r"nginx/(\d+)\.(\d+)\.(\d+)", result.stdout + result.stderr)
@@ -1010,7 +1275,7 @@ def install_bundle(paths: Paths) -> None:
     try:
         paths.app.mkdir(parents=True, exist_ok=True)
         write_atomic(paths.app / ".toastweb-managed", OWNER + "\n")
-        for filename in ("toastweb.py", "VERSION"):
+        for filename in ("toastweb.py", "toastweb_diagnostics.py", "toastweb_monitor.py", "VERSION"):
             shutil.copy2(BUNDLE / filename, paths.app / filename)
         for folder in ("site", "themes"):
             destination = paths.app / folder
@@ -1119,6 +1384,14 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             args.keep_backups if args.keep_backups is not None else policy.get("keep_backups", 5)
         )
         redirect = policy.get("http_redirect", False)
+        monitor = import_module("toastweb_monitor").normalize_monitor(policy.get("monitor", {}))
+        if monitor["enabled"] and monitor["notify_command"]:
+            validate_notifier(paths, monitor["notify_command"])
+        package_restart = (
+            args.package_upgrade_restart
+            if args.package_upgrade_restart is not None
+            else policy.get("package_upgrade_restart", False)
+        )
         if theme is not None:
             print(
                 "Warning: built-in templates are starter/self-check content with a recognizable shared layout. Use your own static content for production; removing branding does not remove fingerprints.",
@@ -1130,7 +1403,7 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
         confirm(args)
         if not (source / "index.html").is_file():
             raise ToastError("Content source must contain index.html.")
-        ensure_dependencies(paths)
+        ensure_dependencies(paths, package_upgrade_restart=package_restart)
         modern = modern_nginx()
         ipv6 = ipv6_available()
         with Transaction(paths):
@@ -1188,6 +1461,9 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
             )
             write_atomic(paths.hook, render_hook(domain), 0o755)
             write_atomic(paths.logrotate, render_logrotate())
+            configure_package_refresh(paths, package_restart)
+            configure_health_files(paths, monitor)
+            run(["systemctl", "daemon-reload"])
             run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
             run(["systemctl", "reload", SERVICE])
             run(["systemctl", "enable", "--now", RENEW_TIMER])
@@ -1199,6 +1475,8 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 "port": port,
                 "worker_connections": connections,
                 "http_redirect": redirect,
+                "package_upgrade_restart": package_restart,
+                "monitor": monitor,
                 "keep_releases": keep_releases,
                 "keep_backups": keep_backups,
                 "title": title,
@@ -1212,10 +1490,17 @@ def install(args: argparse.Namespace, paths: Paths) -> None:
                 "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             }
             write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
+            if monitor["enabled"]:
+                run(["systemctl", "enable", "--now", HEALTH_TIMER])
         post_success_cleanup(paths)
         print(f"Ready: HTTPS backend 127.0.0.1:{port}, SNI {domain}.")
         print("REALITY/DNS/firewall were NOT modified. Coordinate client SNI and Xray changes separately.")
         print("Next: sudo toastweb doctor && sudo toastweb renew-test")
+    if package_restart:
+        try:
+            run(["systemctl", "--no-block", "start", PACKAGE_SERVICE], timeout=10)
+        except ToastError:
+            print("Warning: site installed, but the package refresh task could not be scheduled.", file=sys.stderr)
 
 
 def update(args: argparse.Namespace, paths: Paths, *, rollback: bool = False) -> None:
@@ -1273,6 +1558,7 @@ def status(paths: Paths) -> None:
             "port",
             "worker_connections",
             "http_redirect",
+            "package_upgrade_restart",
             "keep_releases",
             "keep_backups",
             "content_type",
@@ -1283,48 +1569,264 @@ def status(paths: Paths) -> None:
             "updated_at",
         )
     }
+    visible["monitor_enabled"] = state["monitor"]["enabled"]
     visible["service"] = run(["systemctl", "is-active", SERVICE], check=False).stdout.strip()
     visible["renewal_timer"] = run(["systemctl", "is-active", RENEW_TIMER], check=False).stdout.strip()
     print(json.dumps(visible, ensure_ascii=False, indent=2))
 
 
-def doctor(paths: Paths) -> None:
+def collect_diagnostics(
+    paths: Paths, state: dict[str, Any], *, warn_cert_days: int | None = None, dns_checks: bool = False
+) -> dict[str, Any]:
+    return import_module("toastweb_diagnostics").build_report(
+        paths,
+        state,
+        run_command=run,
+        warn_cert_days=state["monitor"]["warn_cert_days"] if warn_cert_days is None else warn_cert_days,
+        dns_checks=dns_checks,
+        service=SERVICE,
+        renewal_timer=RENEW_TIMER,
+    )
+
+
+def doctor(
+    paths: Paths, *, json_output: bool = False, warn_cert_days: int | None = None, dns_checks: bool = False
+) -> int:
+    diagnostics = import_module("toastweb_diagnostics")
+    try:
+        state = load_state(paths)
+        if not state:
+            raise ToastError("ToastWeb is not installed.")
+        assert_owned(paths)
+        report = collect_diagnostics(paths, state, warn_cert_days=warn_cert_days, dns_checks=dns_checks)
+    except (ToastError, OSError, ValueError):
+        report = {
+            "schema_version": 1,
+            "status": "error",
+            "scope": "local_backend",
+            "checks": [
+                {
+                    "id": "installation_state",
+                    "level": "error",
+                    "critical": True,
+                    "message": "Installation state or ownership validation failed.",
+                    "details": {},
+                }
+            ],
+        }
+    print(json.dumps(report, ensure_ascii=False, indent=2) if json_output else diagnostics.format_report(report))
+    return diagnostics.report_exit_code(report)
+
+
+def validate_notifier(paths: Paths, command: str) -> Path:
+    """Only an explicitly configured, root-owned executable with trusted ancestors."""
+    if (
+        not command.startswith("/")
+        or ".." in command.split("/")
+        or any(ord(char) < 32 for char in command)
+        or command == "/root"
+        or command.startswith("/root/")
+        or command == "/home"
+        or command.startswith("/home/")
+    ):
+        raise ToastError("Notification command must be an absolute trusted path outside home directories.")
+    target = paths.at(command)
+    try:
+        for entry in (target, *target.parents):
+            if entry.is_symlink():
+                raise ToastError("Notification command and its ancestors must not be symlinks.")
+            metadata = entry.stat()
+            if metadata.st_uid != 0 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                raise ToastError(
+                    "Notification command and its ancestors must be root-owned and not group/world-writable."
+                )
+        metadata = target.stat()
+    except OSError as exc:
+        raise ToastError("Notification command or trusted parent could not be inspected.") from exc
+    if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111 or metadata.st_mode & 0o077:
+        raise ToastError("Notification command must be a private regular executable (for example root:root 0700).")
+    return target
+
+
+def configure_health_files(paths: Paths, settings: dict[str, Any], *, runtime_stopped: bool = False) -> None:
+    monitoring = import_module("toastweb_monitor")
+    if settings["enabled"]:
+        write_atomic(paths.health_unit, monitoring.render_health_unit(MARKER))
+        write_atomic(paths.health_timer, monitoring.render_health_timer(MARKER, settings["interval_seconds"]))
+    else:
+        # Reinstall also reconciles a disabled policy, but only for files already proved owned.
+        if not runtime_stopped:
+            if paths.health_timer.exists():
+                run(["systemctl", "stop", HEALTH_TIMER])
+                run(["systemctl", "disable", HEALTH_TIMER])
+            if paths.health_unit.exists():
+                run(["systemctl", "stop", HEALTH_SERVICE])
+        paths.health_timer.unlink(missing_ok=True)
+        paths.health_unit.unlink(missing_ok=True)
+
+
+def set_monitor(args: argparse.Namespace, paths: Paths) -> None:
+    require_host(paths)
+    with operation_lock(paths):
+        assert_owned(paths)
+        state = load_state(paths)
+        if not state:
+            raise ToastError("ToastWeb is not installed.")
+        settings = dict(state["monitor"])
+        settings["enabled"] = args.monitor_action == "enable"
+        for option, key in (
+            ("interval", "interval_seconds"),
+            ("failures", "failure_threshold"),
+            ("warn_cert_days", "warn_cert_days"),
+            ("notify_command", "notify_command"),
+        ):
+            value = getattr(args, option, None)
+            if value is not None:
+                settings[key] = value
+        if getattr(args, "clear_notifier", False):
+            settings["notify_command"] = None
+        settings = import_module("toastweb_monitor").normalize_monitor(settings)
+        if settings["enabled"] and settings["notify_command"]:
+            validate_notifier(paths, settings["notify_command"])
+        with Transaction(paths, manage_website=False) as transaction:
+            # Missing units are normal on first enable; a running probe must really stop.
+            run(["systemctl", "stop", HEALTH_TIMER], check=transaction.health_timer_was_active)
+            run(["systemctl", "stop", HEALTH_SERVICE], check=transaction.health_was_active)
+            if not settings["enabled"]:
+                run(["systemctl", "disable", HEALTH_TIMER], check=transaction.health_timer_was_enabled)
+            configure_health_files(paths, settings, runtime_stopped=True)
+            state["monitor"] = settings
+            state["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+            write_atomic(paths.state, json.dumps(state, ensure_ascii=False, indent=2) + "\n", 0o600)
+            run(["systemctl", "daemon-reload"])
+            if settings["enabled"]:
+                run(["systemctl", "enable", "--now", HEALTH_TIMER])
+        post_success_cleanup(paths)
+    print("Local backend monitor " + ("enabled." if settings["enabled"] else "disabled."))
+    print("No website/REALITY service was started, stopped or restarted by monitor configuration.")
+
+
+@contextlib.contextmanager
+def health_lock(paths: Paths) -> Iterator[None]:
+    directory = paths.at("/run/toastweb-health")
+    if directory.is_symlink():
+        raise ToastError("Refusing a symlink at the monitor runtime directory.")
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if sys.platform == "linux":
+        metadata = directory.stat()
+        if metadata.st_uid != 0 or metadata.st_mode & 0o077:
+            raise ToastError("Monitor runtime directory must be private and root-owned.")
+    lock_path = directory / "monitor.lock"
+    if lock_path.is_symlink():
+        raise ToastError("Refusing a symlink at the monitor lock.")
+    fcntl: Any = import_module("fcntl")
+    with lock_path.open("a", encoding="utf-8") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise OperationBusy("Another monitor check is already running.") from exc
+        yield
+
+
+def deliver_health_event(paths: Paths, settings: dict[str, Any], event: dict[str, Any]) -> bool:
+    command = settings["notify_command"]
+    if not command:
+        return True  # The event is emitted in the structured journal/CLI result below.
+    try:
+        target = validate_notifier(paths, command)  # Revalidate at every delivery, not only configuration.
+        result = subprocess.run(
+            [str(target)],
+            input=json.dumps(event, ensure_ascii=False) + "\n",
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+            cwd="/",
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired, ToastError):
+        return False
+
+
+def monitor_check(paths: Paths, *, json_output: bool = False) -> int:
+    require_host(paths)
+    state = load_state(paths)
+    if not state or not state["monitor"]["enabled"]:
+        print(json.dumps({"enabled": False, "status": "disabled"}))
+        return 0
+    monitoring = import_module("toastweb_monitor")
+    diagnostics = import_module("toastweb_diagnostics")
+    with health_lock(paths):
+        state = load_state(paths)
+        if not state or not state["monitor"]["enabled"]:
+            print(json.dumps({"enabled": False, "status": "disabled"}))
+            return 0
+        assert_owned(paths)
+        if paths.health_state.is_symlink():
+            raise ToastError("Refusing a symlink at the monitor state.")
+        previous = read_json(paths.health_state) if paths.health_state.exists() else None
+        report = collect_diagnostics(paths, state)  # DNS is opt-in doctor-only, not a timer dependency.
+        now = time.time()
+        current, event = monitoring.advance(previous, report, state["monitor"], now=now)
+        write_atomic(paths.health_state, json.dumps(current, ensure_ascii=False, indent=2) + "\n", 0o600)
+        delivered: bool | None = None
+        if event:
+            delivered = deliver_health_event(paths, state["monitor"], event)
+            current = monitoring.record_delivery(current, event, success=delivered, now=now)
+            write_atomic(paths.health_state, json.dumps(current, ensure_ascii=False, indent=2) + "\n", 0o600)
+        report["monitor"] = {
+            "enabled": True,
+            "event": event,
+            "delivered": delivered,
+            "channel": "command" if state["monitor"]["notify_command"] else "journal",
+            "consecutive_failures": current["consecutive_failures"],
+            "failure_threshold": state["monitor"]["failure_threshold"],
+        }
+        print(
+            json.dumps(report, ensure_ascii=False, indent=2)
+            if json_output
+            else diagnostics.format_report(report) + "\nMonitor: " + json.dumps(report["monitor"], ensure_ascii=False)
+        )
+        return 1 if delivered is False else diagnostics.report_exit_code(report)
+
+
+def monitor_status(paths: Paths) -> None:
     state = load_state(paths)
     if not state:
         raise ToastError("ToastWeb is not installed.")
-    assert_owned(paths)
-    run(["/usr/sbin/nginx", "-t", "-c", str(paths.config)])
-    run(["systemctl", "is-active", "--quiet", SERVICE])
-    run(["systemctl", "is-enabled", "--quiet", RENEW_TIMER])
-    run(["systemctl", "is-active", "--quiet", RENEW_TIMER])
-    limit = run(["systemctl", "show", SERVICE, "--property=LimitNOFILESoft", "--value"]).stdout.strip()
-    if limit != "infinity":
+    settings = dict(state["monitor"])
+    settings["notifier_configured"] = bool(settings.pop("notify_command"))
+    if paths.health_state.is_symlink():
+        raise ToastError("Refusing a symlink at the monitor state.")
+    previous = read_json(paths.health_state) if paths.health_state.exists() else None
+    # Validate all fields before displaying metadata, not just its ownership marker.
+    if previous is not None:
+        previous = import_module("toastweb_monitor").validate_runtime_state(previous)
+    units: dict[str, str] = {}
+    for label, unit in (("timer", HEALTH_TIMER), ("probe", HEALTH_SERVICE)):
         try:
-            sufficient = int(limit) >= file_limit(state["worker_connections"])
-        except ValueError:
-            sufficient = False
-        if not sufficient:
-            raise ToastError(
-                "Service file-descriptor limit is below the configured connection budget; reinstall the updated unit."
-            )
-    certificate = paths.lineage(state["domain"]) / "fullchain.pem"
-    run(["openssl", "x509", "-in", str(certificate), "-noout", "-checkend", "0"])
-    run(["openssl", "x509", "-in", str(certificate), "-noout", "-checkhost", state["domain"]])
-    context = ssl.create_default_context()
-    context.set_alpn_protocols(["h2", "http/1.1"])
-    try:
-        with (
-            socket.create_connection(("127.0.0.1", state["port"]), timeout=8) as tcp,
-            context.wrap_socket(tcp, server_hostname=state["domain"]) as tls,
-        ):
-            if tls.version() != "TLSv1.3" or tls.selected_alpn_protocol() != "h2":
-                raise ToastError("Backend did not negotiate TLS 1.3 + h2.")
-            print(f"Verified backend: {tls.version()}, {tls.selected_alpn_protocol()}, trusted certificate.")
-    except (OSError, ssl.SSLError) as exc:
-        raise ToastError(f"Backend TLS verification failed ({type(exc).__name__}).") from exc
-    print("Nginx configuration, certificate and renewal timer checks passed.")
+            observed = run(["systemctl", "is-active", unit], check=False, timeout=8).stdout.strip()
+        except ToastError:
+            observed = "unknown"
+        units[label] = (
+            observed if observed in {"active", "inactive", "failed", "activating", "deactivating"} else "unknown"
+        )
     print(
-        "This does not test public port-80 reachability, CA renewal, MLKEM, or the REALITY client. Run renew-test and validate REALITY separately."
+        json.dumps(
+            {
+                "settings": settings,
+                "units": units,
+                "last_check": {
+                    key: previous.get(key) for key in ("last_checked_at", "last_level", "consecutive_failures")
+                }
+                if previous
+                else None,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     )
 
 
@@ -1379,6 +1881,12 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument(
             "--expected-ip", action="append", default=[], help="Explicit public address for NAT; repeat if needed"
         )
+        sub.add_argument(
+            "--package-upgrade-restart",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Opt in to scoped package-update restarts; default off, or preserve the existing policy",
+        )
         sub.add_argument("--accept-tos", action="store_true")
         sub.add_argument("--confirm-port-80", action="store_true")
         sub.add_argument("--allow-existing-acme", action="store_true")
@@ -1397,7 +1905,25 @@ def parser() -> argparse.ArgumentParser:
     sub.add_argument("--keep-releases", type=int)
     sub.add_argument("--keep-backups", type=int)
     sub.add_argument("--apply", action="store_true")
-    for name in ("rollback", "status", "doctor", "renew-test"):
+    commands.add_parser("package-refresh", help="Apply pending runtime package updates to this active site only")
+    sub = commands.add_parser("doctor", help="Read-only local diagnostics, not a REALITY authentication test")
+    sub.add_argument("--json", action="store_true", dest="json_output")
+    sub.add_argument("--warn-cert-days", type=int, choices=range(1, 91), metavar="1..90")
+    sub.add_argument("--dns-checks", action="store_true", help="Opt in to public CAA/DNSSEC queries via dns.google")
+    monitor = commands.add_parser("monitor", help="Configure/run the opt-in local backend health monitor")
+    actions = monitor.add_subparsers(dest="monitor_action", required=True)
+    sub = actions.add_parser("enable")
+    sub.add_argument("--interval", type=int, choices=range(60, 3601), metavar="60..3600")
+    sub.add_argument("--failures", type=int, choices=range(1, 11), metavar="1..10")
+    sub.add_argument("--warn-cert-days", type=int, choices=range(1, 91), metavar="1..90")
+    notifier = sub.add_mutually_exclusive_group()
+    notifier.add_argument("--notify-command", help="Absolute root-owned executable; receives safe event JSON on stdin")
+    notifier.add_argument("--clear-notifier", action="store_true", help="Use journal only")
+    actions.add_parser("disable")
+    actions.add_parser("status")
+    sub = actions.add_parser("check")
+    sub.add_argument("--json", action="store_true", dest="json_output")
+    for name in ("rollback", "status", "renew-test"):
         commands.add_parser(name)
     return result
 
@@ -1444,6 +1970,10 @@ def main(argv: list[str] | None = None) -> int:
                             args.worker_connections if args.worker_connections is not None else 512
                         ),
                         "http_redirect": False,
+                        "package_upgrade_restart": bool(args.package_upgrade_restart),
+                        "package_restart_policy": "default off; reinstall preserves the existing policy unless explicit",
+                        "monitor_enabled": False,
+                        "monitor_policy": "default off; existing monitoring settings are preserved on reinstall",
                         "keep_releases": args.keep_releases if args.keep_releases is not None else 5,
                         "keep_backups": args.keep_backups if args.keep_backups is not None else 5,
                         "service": SERVICE,
@@ -1467,9 +1997,20 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             status(paths)
         elif args.command == "doctor":
-            doctor(paths)
+            return doctor(
+                paths, json_output=args.json_output, warn_cert_days=args.warn_cert_days, dns_checks=args.dns_checks
+            )
+        elif args.command == "monitor":
+            if args.monitor_action in {"enable", "disable"}:
+                set_monitor(args, paths)
+            elif args.monitor_action == "check":
+                return monitor_check(paths, json_output=args.json_output)
+            else:
+                monitor_status(paths)
         elif args.command == "renew-test":
             renew_test(paths)
+        elif args.command == "package-refresh":
+            package_refresh(paths)
         elif args.command == "http-redirect":
             set_http_redirect(args, paths)
         elif args.command == "prune":

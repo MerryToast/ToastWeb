@@ -17,8 +17,10 @@ import time
 import unittest
 from importlib import import_module
 from pathlib import Path
+from unittest import mock
 
 import toastweb as tw
+import toastweb_diagnostics as diagnostics
 
 LIVE = os.name == "posix" and os.environ.get("TOASTWEB_LIVE_NGINX") == "1"
 
@@ -277,6 +279,17 @@ class NginxIntegrationTests(unittest.TestCase):
             response = http.client.HTTPResponse(tls, method=method)
             response.begin()
             return response.status, dict(response.getheaders()), response.read()
+
+    def test_diagnostic_probes_verify_actual_tls_http_and_served_leaf(self) -> None:
+        factory = ssl.create_default_context
+        with mock.patch.object(
+            diagnostics.ssl, "create_default_context", side_effect=lambda: factory(cafile=str(self.certificate))
+        ):
+            peer = diagnostics._probe_h2("notes.example.org", self.https_port)
+            head = diagnostics._probe_http11("notes.example.org", self.https_port)
+        self.assertEqual((peer["version"], peer["alpn"]), ("TLSv1.3", "h2"))
+        self.assertEqual(peer["fingerprint"], diagnostics._certificate_fingerprint(self.certificate.read_bytes()))
+        self.assertEqual(head, {"status": 200, "alpn": "http/1.1"})
 
     def test_three_theme_sites_and_metadata(self) -> None:
         try:
