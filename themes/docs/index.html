@@ -1,38 +1,358 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="docs">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="{{SITE_DESCRIPTION}}"><title>{{SITE_TITLE}} · Documentation</title>
-  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/theme.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{{SITE_DESCRIPTION}}">
+  <title>{{SITE_TITLE}} · Documentation</title>
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/theme.css">
 </head>
 <body id="top">
   <a class="skip" href="#overview">跳到正文</a>
-  <header class="topbar"><div class="top-inner"><a class="brand" href="/"><img src="/assets/mark.svg" width="30" height="30" alt="">{{SITE_TITLE}}</a><span class="separator"></span><span class="workspace">Documentation</span><a class="top-link" href="#quickstart">快速开始 <span aria-hidden="true">↗</span></a></div></header>
+
+  <header class="topbar">
+    <div class="top-inner">
+      <div class="brand-group">
+        <a class="brand" href="/">
+          <img src="assets/mark.svg" width="28" height="28" alt="">
+          <span>{{SITE_TITLE}}</span>
+        </a>
+        <span class="badge-pill">DOCS</span>
+        <span class="separator" aria-hidden="true"></span>
+        <span class="workspace">{{DOMAIN}}</span>
+      </div>
+      <nav class="top-nav" aria-label="顶部快捷导航">
+        <a class="active" href="#overview">指南</a>
+        <a href="#structure">目录规范</a>
+        <a href="#configuration">交付标准</a>
+        <a href="#questions">常见问答</a>
+      </nav>
+      <div class="top-actions">
+        <a class="top-cta" href="#quickstart">快速开始 <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </header>
+
   <div class="layout">
-    <aside class="sidebar" aria-label="文档导航">
-      <div class="space-label">THE HANDBOOK</div>
-      <nav><a class="selected" href="#overview"><span>◈</span> 概览</a><a href="#quickstart"><span>↗</span> 快速开始</a><a href="#structure"><span>▦</span> 内容结构</a><a href="#publishing"><span>↑</span> 发布与更新</a><a href="#principles"><span>◇</span> 维护原则</a><a href="#questions"><span>?</span> 常见问题</a></nav>
-      <div class="sidebar-note"><span class="tiny-dot"></span> Simple by design<p>少一些依赖，<br>多一些清晰的说明。</p></div>
+    <aside class="sidebar" aria-label="文档章节导航">
+      <div class="nav-section">
+        <div class="space-label">GETTING STARTED</div>
+        <nav>
+          <a class="selected" href="#overview">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5A1.5 1.5 0 0 1 4 2h8a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 12 14H4a1.5 1.5 0 0 1-1.5-1.5v-9Z"/><path d="M5.5 5.5h5M5.5 8.5h3.5"/></svg>
+            <span>站点概览</span>
+          </a>
+          <a href="#quickstart">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 2 4 9h4l-.5 5L12 7H8l.5-5Z"/></svg>
+            <span>快速开始</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="nav-section">
+        <div class="space-label">CONTENT &amp; BUILD</div>
+        <nav>
+          <a href="#structure">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h2.4l1.4 1.5H12A1.5 1.5 0 0 1 13.5 5.5v6.5A1.5 1.5 0 0 1 12 13.5H4A1.5 1.5 0 0 1 2.5 12V4Z"/></svg>
+            <span>目录与构建结构</span>
+          </a>
+          <a href="#configuration">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12M6 6.5V13"/></svg>
+            <span>资源与交付规范</span>
+          </a>
+          <a href="#publishing">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V3.5M5 6.5 8 3.5l3 3M3 13h10"/></svg>
+            <span>发布与版本回退</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="nav-section">
+        <div class="space-label">OPERATIONS</div>
+        <nav>
+          <a href="#principles">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 3 4.2v4.1c0 3.1 2.1 5.3 5 6.2 2.9-.9 5-3.1 5-6.2V4.2L8 2Z"/><path d="m6 8 1.5 1.5L10.5 6.5"/></svg>
+            <span>长期维护原则</span>
+          </a>
+          <a href="#questions">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M6.6 6.4a1.5 1.5 0 1 1 2.1 1.4c-.5.3-.7.6-.7 1.2M8 11.3h.01"/></svg>
+            <span>常见问题解答</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="sidebar-note">
+        <div class="note-badge"><span class="tiny-dot"></span> OFFLINE READY</div>
+        <p>全站静态资源、样式表与矢量图标均由本机直接提供，无外部脚本依赖。</p>
+      </div>
     </aside>
+
     <main class="article">
-      <div class="breadcrumb">Guide <span>/</span> Getting started</div>
-      <section id="overview"><span class="eyebrow">INTRODUCTION</span><h1>从一份清楚的文档开始。</h1><p class="lead">{{SITE_DESCRIPTION}}</p><p>这里是一份轻量站点手册：记录内容如何组织、怎样发布，以及日常维护需要留意的事情。所有页面与静态资源都保存在本站，不依赖外部字体或登录服务。</p><div class="notice"><span class="notice-icon">i</span><div><strong>关于这份手册</strong><p>当前内容为初始指南。请按你的实际项目补充说明，不必为填满页面而编造服务、接口或个人经历。</p></div></div></section>
-      <section id="quickstart"><div class="section-kicker">01 / GET STARTED</div><h2>从小处开始</h2><p>准备好首页、导航和一份真正有用的说明。一个简单但完整的网站，比很多没有内容的入口更容易维护。</p><div class="steps"><div><span>1</span><h3>整理内容</h3><p>写下你希望长期保留的笔记，使用清楚的标题和可访问的链接。</p></div><div><span>2</span><h3>本地预览</h3><p>检查桌面和手机布局，确认样式与图片不依赖第三方站点。</p></div><div><span>3</span><h3>发布并检查</h3><p>发布前保留旧版本，更新后检查页面、资源和证书状态。</p></div></div></section>
-      <section id="structure"><div class="section-kicker">02 / ORGANIZE</div><h2>让结构保持简单</h2><p>一个静态目录就足够承载首页、指南和本地资源。复杂的构建工具不是浏览页面的前提。</p><div class="code-label"><span>Example directory</span><span>STATIC FILES</span></div><pre><code>public/
-├── index.html
-├── guides/
-│   └── getting-started.html
-└── assets/
-    ├── site.css
-    └── mark.svg</code></pre><p class="caption">示例目录用于说明组织方式，不是本站实际目录的完整披露。</p></section>
-      <section id="publishing"><div class="section-kicker">03 / PUBLISH</div><h2>更新应该可以回退</h2><p>在本地完成构建，只发布生成后的静态文件。不要把凭据、私钥、开发环境或未完成的草稿一起上传。</p><pre><code>发布前：检查本地构建结果，保留上一版内容。
-发布后：核对页面、导航和本地资源。
-发现问题：恢复上一版内容并重新检查。</code></pre><div class="link-cards"><a href="#principles"><span class="card-icon">◇</span><strong>维护原则</strong><p>保持依赖和公开信息尽可能少。</p><span class="arrow">→</span></a><a href="#questions"><span class="card-icon">?</span><strong>常见问题</strong><p>了解这份静态手册的功能边界。</p><span class="arrow">→</span></a></div></section>
-      <section id="principles"><div class="section-kicker">04 / MAINTAIN</div><h2>把注意力留给内容</h2><ul class="checklist"><li><strong>本地资源：</strong>不加载广告、远程字体或第三方分析脚本。</li><li><strong>真实信息：</strong>没有接入监控时，不发布虚构的在线率或实时指标。</li><li><strong>有边界的公开：</strong>不要把管理入口、账号凭据和内部拓扑写进公开页面。</li><li><strong>定期检查：</strong>证书、链接和备份都需要持续维护。</li></ul></section>
-      <section id="questions"><div class="section-kicker">05 / FAQ</div><h2>你可能会问</h2><details open><summary>这个页面需要账号或后端吗？</summary><p>不需要。这是一份只读静态手册，没有登录表单，也不保存访客输入。</p></details><details><summary>可以替换成自己的文档吗？</summary><p>可以。保留有效的导航和本地资源路径，发布你自己的静态目录即可。</p></details><details><summary>这份文档是否代表某项服务正在被实时监测？</summary><p>不是。页面只提供说明，不冒充监控系统或第三方产品。</p></details></section>
-      <footer class="article-footer"><span>Page built {{BUILD_DATE}}</span><a href="#top">返回顶部 ↑</a></footer>
+      <div class="article-header">
+        <div class="breadcrumb">
+          <span>Documentation</span>
+          <span class="crumb-sep">/</span>
+          <span>Handbook</span>
+          <span class="crumb-sep">/</span>
+          <span class="crumb-current">Overview</span>
+        </div>
+        <div class="article-meta">
+          <span class="meta-chip">只读静态文档</span>
+          <span class="meta-chip">零外部依赖</span>
+          <span class="meta-chip">域名：{{DOMAIN}}</span>
+        </div>
+      </div>
+
+      <section id="overview">
+        <span class="eyebrow">INTRODUCTION</span>
+        <h1>构建清晰、可维护的静态文档站点</h1>
+        <p class="lead">{{SITE_DESCRIPTION}}</p>
+        <p>这份手册记录了站点内容的组织结构、本地构建与发布校验流程，以及日常维护时的安全与隐私边界。通过将文档收敛为纯静态 HTML、CSS 与矢量资源，站点可以在保持高速响应的同时，彻底消除对数据库、动态运行时及第三方脚本的依赖。</p>
+
+        <div class="notice">
+          <div class="notice-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v3.8M8 5.1h.01"/></svg>
+          </div>
+          <div class="notice-body">
+            <strong>关于这份文档手册</strong>
+            <p>当前页面是站点的标准文档基线。你可以根据实际项目需求替换正文或发布使用文档生成工具构建的静态目录，始终保持公开内容与实际功能一致。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="quickstart">
+        <div class="section-kicker">01 / QUICKSTART</div>
+        <h2>三步完成内容准备与上线</h2>
+        <p>良好的文档站点不需要复杂的后台系统。围绕“编写—预览—原子发布”三个环节，即可建立稳定可靠的内容更新节奏。</p>
+
+        <div class="steps">
+          <div class="step-card">
+            <div class="step-top">
+              <span class="step-num">STEP 01</span>
+              <span class="step-tag">Authoring</span>
+            </div>
+            <h3>梳理章节与导航</h3>
+            <p>编写结构清晰的文档正文，确保每个章节标题拥有固定锚点，所有内部链接与资源引用均采用相对路径。</p>
+          </div>
+          <div class="step-card">
+            <div class="step-top">
+              <span class="step-num">STEP 02</span>
+              <span class="step-tag">Verification</span>
+            </div>
+            <h3>多视口本地预览</h3>
+            <p>在桌面宽屏与移动端窄屏下分别核对排版、表格与代码区域，确认不存在横向溢出或失效的静态资源。</p>
+          </div>
+          <div class="step-card">
+            <div class="step-top">
+              <span class="step-num">STEP 03</span>
+              <span class="step-tag">Release</span>
+            </div>
+            <h3>版本化发布与核验</h3>
+            <p>将构建产物发布为独立版本目录并切换当前指针，保留上一版本快照以便在发现版面问题时随时回退。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="structure">
+        <div class="section-kicker">02 / DIRECTORY STRUCTURE</div>
+        <h2>保持直观的静态目录结构</h2>
+        <p>无论是手工维护 HTML 还是使用静态站点生成器（如 Hugo、VitePress 等）在本地预构建，最终发布的产物都应当是一个自包含的纯静态目录。</p>
+
+        <div class="code-window">
+          <div class="code-header">
+            <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span class="code-title">public/ — 静态发布目录结构示例</span>
+            <span class="code-badge">STATIC FILES</span>
+          </div>
+          <pre><code><span class="hl-dir">public/</span>
+├── <span class="hl-file">index.html</span>                <span class="hl-comment"># 站点入口文档，包含完整语义化章节与导航</span>
+├── <span class="hl-dir">guides/</span>
+│   ├── <span class="hl-file">getting-started.html</span>  <span class="hl-comment"># 可选的专题子页面（使用相对路径互链）</span>
+│   └── <span class="hl-file">maintenance.html</span>      <span class="hl-comment"># 运维与排障核对清单</span>
+└── <span class="hl-dir">assets/</span>
+    ├── <span class="hl-file">theme.css</span>             <span class="hl-comment"># 本地样式表（不含远程 @import 或外部字体）</span>
+    └── <span class="hl-file">mark.svg</span>              <span class="hl-comment"># 站点矢量图标与内联图形资源</span></code></pre>
+        </div>
+        <p class="caption">提示：公开站点目录中不应包含隐藏文件（如 <code>.env</code>、<code>.git</code>）、符号链接或任何私钥凭据。示例目录仅用于说明组织方式。</p>
+      </section>
+
+      <section id="configuration">
+        <div class="section-kicker">03 / SPECIFICATIONS</div>
+        <h2>静态资源与交付标准</h2>
+        <p>为了保证文档在各类网络环境与浏览器中均能稳定、安全地呈现，本站遵循以下静态资源与 HTTP 交付规范：</p>
+
+        <div class="table-wrap">
+          <table class="spec-table">
+            <thead>
+              <tr>
+                <th>模块维度</th>
+                <th>采用标准</th>
+                <th>设计约束与安全边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>文档标记</strong></td>
+                <td><code>HTML5 Semantic</code></td>
+                <td>仅包含静态排版与折叠标签，不含表单、输入框、脚本或内嵌框架</td>
+              </tr>
+              <tr>
+                <td><strong>样式与字体</strong></td>
+                <td><code>System UI Stack</code></td>
+                <td>优先调用操作系统原生中英文字体栈，不请求第三方远程字体服务</td>
+              </tr>
+              <tr>
+                <td><strong>请求方法</strong></td>
+                <td><code>GET / HEAD</code></td>
+                <td>仅响应只读访问请求，拒绝 <code>POST</code>、<code>PUT</code> 等写入方法</td>
+              </tr>
+              <tr>
+                <td><strong>响应安全头</strong></td>
+                <td><code>nosniff &amp; Referrer</code></td>
+                <td>默认启用内容类型嗅探保护与严格的跨源引荐来源策略</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="publishing">
+        <div class="section-kicker">04 / PUBLISH &amp; ROLLBACK</div>
+        <h2>可验证的发布与回退工作流</h2>
+        <p>每次内容更新都应当是可逆的。在将新构建的静态文件推送上线前，请按照以下核对清单完成上线前自检与上线后验证：</p>
+
+        <div class="compare-grid">
+          <div class="compare-card good">
+            <div class="compare-head">
+              <span class="compare-badge">PRE-FLIGHT</span>
+              <strong>发布前核对要点</strong>
+            </div>
+            <ul>
+              <li>确认根目录包含有效的 <code>index.html</code> 入口文件</li>
+              <li>清理构建目录中的临时草稿、隐藏文件与构建缓存</li>
+              <li>核对所有页内锚点与静态资源路径均可正常解析</li>
+            </ul>
+          </div>
+          <div class="compare-card caution">
+            <div class="compare-head">
+              <span class="compare-badge">POST-RELEASE</span>
+              <strong>上线后与回退处置</strong>
+            </div>
+            <ul>
+              <li>通过 HTTPS 访问首页与静态资源，检查状态码与排版</li>
+              <li>若发现内容错误或样式异常，立即切回上一版本目录</li>
+              <li>保留最近若干个已验证的历史版本以备比对审计</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="link-cards">
+          <a href="#principles">
+            <span class="card-kicker">SECTION 05</span>
+            <strong>浏览长期维护原则</strong>
+            <p>了解如何保持最小化外部依赖与清晰的信息披露边界。</p>
+            <span class="arrow" aria-hidden="true">→</span>
+          </a>
+          <a href="#questions">
+            <span class="card-kicker">SECTION 06</span>
+            <strong>查看常见问题解答</strong>
+            <p>关于静态文档架构、自定义内容替换与功能范围的说明。</p>
+            <span class="arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+      </section>
+
+      <section id="principles">
+        <div class="section-kicker">05 / MAINTENANCE PRINCIPLES</div>
+        <h2>把注意力留给真正有用的内容</h2>
+        <p>一个耐用的文档网站依靠克制的设计而非堆砌功能来维持长期可靠。日常维护中建议坚持四项基本准则：</p>
+
+        <ul class="checklist">
+          <li>
+            <strong>坚持本地自包含资源：</strong>
+            <span>页面所需的样式与图形全部保存在本地目录，不引入广告、追踪器或外部 CDN 脚本。</span>
+          </li>
+          <li>
+            <strong>坚持真实准确的信息表达：</strong>
+            <span>未接入实时探测时不展示虚构的在线率，未提供动态后端时不放置无效的搜索框或登录入口。</span>
+          </li>
+          <li>
+            <strong>坚持有边界的公开范围：</strong>
+            <span>公开文档只记录面向读者的使用说明，绝不将内部管理口令、私钥或非公开拓扑写入页面。</span>
+          </li>
+          <li>
+            <strong>坚持定期巡检与备份：</strong>
+            <span>定期核查 TLS 证书有效期、链接可达性以及历史版本备份的完整性。</span>
+          </li>
+        </ul>
+      </section>
+
+      <section id="questions">
+        <div class="section-kicker">06 / FREQUENTLY ASKED QUESTIONS</div>
+        <h2>常见问题解答</h2>
+
+        <div class="faq-list">
+          <details open>
+            <summary>浏览这个文档站点需要注册账号或登录吗？</summary>
+            <p>不需要。本站为纯静态只读文档站点，不提供用户系统或登录接口，也不会收集、存储访客的任何输入信息。</p>
+          </details>
+          <details>
+            <summary>可以使用静态站点生成器生成的目录替换当前内容吗？</summary>
+            <p>完全可以。在本地或 CI 环境完成静态构建后，只需将包含 <code>index.html</code> 及静态资源的输出目录发布上线即可。</p>
+          </details>
+          <details>
+            <summary>为什么页面中不使用外部网络字体或第三方统计组件？</summary>
+            <p>移除第三方资源可以消除跨站请求带来的隐私顾虑与加载阻塞，即使在受限网络环境下也能瞬间完成渲染。</p>
+          </details>
+          <details>
+            <summary>页面底部显示的时间代表什么含义？</summary>
+            <p>代表当前静态文档版本的生成与发布时间（UTC），用于帮助读者确认当前查阅的内容版本，而非实时动态计数器。</p>
+          </details>
+        </div>
+      </section>
+
+      <nav class="doc-pager" aria-label="章节前后导航">
+        <a class="pager-item" href="#overview">
+          <span class="pager-label">← 回到开篇</span>
+          <strong>站点概览与介绍</strong>
+        </a>
+        <a class="pager-item next" href="#quickstart">
+          <span class="pager-label">重温核心流程 →</span>
+          <strong>三步完成内容准备与上线</strong>
+        </a>
+      </nav>
+
+      <footer class="article-footer">
+        <div class="footer-left">
+          <strong>{{SITE_TITLE}}</strong>
+          <span class="footer-sep">·</span>
+          <span>{{DOMAIN}}</span>
+          <span class="footer-sep">·</span>
+          <span>Page built {{BUILD_DATE}}</span>
+        </div>
+        <a class="back-top" href="#top">返回顶部 ↑</a>
+      </footer>
     </main>
-    <aside class="toc" aria-label="本页目录"><span>ON THIS PAGE</span><a href="#overview">概览</a><a href="#quickstart">快速开始</a><a href="#structure">内容结构</a><a href="#publishing">发布与更新</a><a href="#principles">维护原则</a><a href="#questions">常见问题</a><div class="toc-domain">{{DOMAIN}}</div></aside>
+
+    <aside class="toc" aria-label="本页目录">
+      <div class="toc-box">
+        <span class="toc-heading">ON THIS PAGE</span>
+        <nav class="toc-links">
+          <a class="active" href="#overview">站点概览</a>
+          <a href="#quickstart">01. 快速开始</a>
+          <a href="#structure">02. 目录与构建结构</a>
+          <a href="#configuration">03. 资源与交付规范</a>
+          <a href="#publishing">04. 发布与版本回退</a>
+          <a href="#principles">05. 长期维护原则</a>
+          <a href="#questions">06. 常见问题解答</a>
+        </nav>
+        <div class="toc-meta">
+          <div><span>Host</span><strong>{{DOMAIN}}</strong></div>
+          <div><span>Mode</span><strong>Static HTML5</strong></div>
+        </div>
+      </div>
+    </aside>
   </div>
 </body>
 </html>
